@@ -67,7 +67,7 @@ jobs:
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./tools/prepare_platform.sh
+        run: bash tools/prepare_platform.sh
 
       - name: flutter pub get
         run: flutter pub get
@@ -113,8 +113,7 @@ jobs:
 
       - name: Resolve version
         id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
+        id_inputs: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -135,7 +134,7 @@ jobs:
           cache: true
 
       - name: Prepare platform folders
-        run: ./tools/prepare_platform.sh
+        run: bash tools/prepare_platform.sh
 
       - name: flutter pub get
         run: flutter pub get
@@ -156,7 +155,7 @@ jobs:
           set -euo pipefail
           # The checked-in script carries a default version; stamp it on the runner
           # copy only, so a tag never leaves the repo dirty.
-          sed -i 's/^#define AppVersion .*/#define AppVersion     "${{ steps.version.outputs.version }}"/' \
+          sed -i 's/^#define AppVersion .*/#define AppVersion    "${{ steps.version.outputs.version }}"/' \
             windows/installer/friend-chat.iss
           grep '^#define AppVersion' windows/installer/friend-chat.iss
 
