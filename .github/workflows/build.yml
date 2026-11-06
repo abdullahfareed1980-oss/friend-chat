@@ -62,10 +62,10 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
-      - name: Build release APKs
+      - name: Build debug APKs
         run: |
           set -euo pipefail
-          flutter build apk --release \
+          flutter build apk --debug \
             --build-name "${{ steps.version.outputs.version }}" \
             --build-number "${{ steps.version.outputs.code }}"
 
@@ -76,9 +76,9 @@ jobs:
           OUT="$GITHUB_WORKSPACE/dist/apk"
           mkdir -p "$OUT"
           shopt -s nullglob
-          for f in build/app/outputs/flutter-apk/*-release*.apk; do
+          for f in build/app/outputs/flutter-apk/*.apk; do
             abi="$(basename "$f" .apk)"
-            cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}.apk"
+            cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}-${abi}.apk"
           done
           ls -lh "$OUT"
 
