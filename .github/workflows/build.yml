@@ -1,8 +1,5 @@
 name: Build installers
 
-# Tag `v1.2.3` -> signed Android APKs + FriendChatSetup-1.2.3.exe attached to a
-# GitHub Release. Manual runs build the same artefacts without publishing.
-
 on:
   push:
     tags:
@@ -60,11 +57,6 @@ jobs:
           cache: true
 
       - name: Prepare platform folders
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bash tools/prepare_platform.sh
 
       - name: flutter pub get
@@ -73,7 +65,7 @@ jobs:
       - name: Build release APKs
         run: |
           set -euo pipefail
-          flutter build apk --release --split-per-abi \
+          flutter build apk --release \
             --build-name "${{ steps.version.outputs.version }}" \
             --build-number "${{ steps.version.outputs.code }}"
 
@@ -86,10 +78,7 @@ jobs:
           shopt -s nullglob
           for f in build/app/outputs/flutter-apk/*-release*.apk; do
             abi="$(basename "$f" .apk)"
-            abi="${abi#app-}"
-            abi="${abi%-release-unsigned}"
-            abi="${abi%-release}"
-            cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}-${abi}.apk"
+            cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}.apk"
           done
           ls -lh "$OUT"
 
