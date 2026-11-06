@@ -59,15 +59,20 @@ jobs:
       - name: Prepare platform folders
         run: bash tools/prepare_platform.sh
 
-      - name: Fix compileSdk for plugins
+      - name: Force Fix Android Compile SDK for Plugins
         shell: bash
         run: |
           set -euo pipefail
-          BUILD_GRADLE="android/app/build.gradle"
-          if [ -f "$BUILD_GRADLE" ]; then
-            sed -i 's/compileSdk[[:space:]]*=.*/compileSdk = 36/' "$BUILD_GRADLE" || true
-            sed -i 's/compileSdkVersion.*/compileSdkVersion 36/' "$BUILD_GRADLE" || true
-          fi
+          echo "Checking and updating build.gradle files..."
+          find . -name "build.gradle" | while read -r file; do
+            if grep -q "compileSdkVersion" "$file" || grep -q "compileSdk" "$file"; then
+              sed -i 's/compileSdkVersion[[:space:]]*[0-9]*/compileSdkVersion 36/g' "$file"
+              sed -i 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]*/compileSdk = 36/g' "$file"
+              sed -i 's/targetSdkVersion[[:space:]]*[0-9]*/targetSdkVersion 36/g' "$file"
+              sed -i 's/targetSdk[[:space:]]*=[[:space:]]*[0-9]*/targetSdk = 36/g' "$file"
+              echo "Updated $file"
+            fi
+          done
 
       - name: flutter pub get
         run: flutter pub get
