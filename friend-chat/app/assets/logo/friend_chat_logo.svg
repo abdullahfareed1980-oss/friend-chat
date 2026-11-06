@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Friend Chat - app icon / vector master.
+  512x512, no external references. Two overlapping speech bubbles on a shield
+  outline with a secure node network, over a midnight-indigo gradient plate.
+  The Dart equivalent lives in lib/widgets/friend_chat_logo.dart.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100" role="img" aria-label="Friend Chat">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="0.55" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#1E1B4B"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6EE7B7"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <radialGradient id="shieldGlow" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#34D399" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#34D399" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- plate -->
+  <rect x="0" y="0" width="100" height="100" rx="28" fill="url(#plate)"/>
+  <rect x="0.7" y="0.7" width="98.6" height="98.6" rx="27.4" fill="none"
+        stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.4"/>
+
+  <!-- shield -->
+  <path d="M50 12 Q76 20 82 26 L82 48 C82 68 68 82 50 90 C32 82 18 68 18 48 L18 26 Q24 20 50 12 Z"
+        fill="url(#shieldGlow)" stroke="#34D399" stroke-opacity="0.5" stroke-width="2.2"/>
+
+  <!-- back bubble -->
+  <g filter="url(#softGlow)">
+    <rect x="24" y="30" width="42" height="30" rx="11" fill="#FFFFFF" fill-opacity="0.94"/>
+    <path d="M31 58 L28 68 L40 59 Z" fill="#FFFFFF" fill-opacity="0.94"/>
+    <circle cx="38" cy="45" r="2.1" fill="#4F46E5" fill-opacity="0.75"/>
+    <circle cx="46" cy="45" r="2.1" fill="#4F46E5" fill-opacity="0.75"/>
+    <circle cx="54" cy="45" r="2.1" fill="#4F46E5" fill-opacity="0.75"/>
+  </g>
+
+  <!-- front bubble, overlapping -->
+  <rect x="41.4" y="43.4" width="39.2" height="29.2" rx="12.6" fill="#2A1D63"/>
+  <rect x="44" y="46" width="34" height="24" rx="10" fill="url(#mint)"/>
+  <path d="M66 68 L72 74 L62 69.5 Z" fill="#34D399"/>
+  <line x1="52" y1="58" x2="70" y2="58" stroke="#0B0B14" stroke-opacity="0.55"
+        stroke-width="2" stroke-linecap="round"/>
+
+  <!-- secure node network -->
+  <g stroke="#6EE7B7" stroke-opacity="0.55" stroke-width="1.1">
+    <line x1="72" y1="18" x2="86" y2="26"/>
+    <line x1="86" y1="26" x2="76" y2="36"/>
+    <line x1="72" y1="18" x2="76" y2="36"/>
+  </g>
+  <g fill="#6EE7B7">
+    <circle cx="72" cy="18" r="2.6"/>
+    <circle cx="86" cy="26" r="2.6"/>
+    <circle cx="76" cy="36" r="2.6"/>
+  </g>
+  <g fill="none" stroke="#34D399" stroke-opacity="0.4" stroke-width="0.9">
+    <circle cx="72" cy="18" r="4.6"/>
+    <circle cx="86" cy="26" r="4.6"/>
+    <circle cx="76" cy="36" r="4.6"/>
+  </g>
+</svg>

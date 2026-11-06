@@ -1,0 +1,22 @@
+# --- generated platform folders (app/tools/prepare_platform.sh) -------------
+app/android/
+app/windows/CMakeLists.txt
+app/windows/flutter/
+app/windows/runner/
+
+# --- release signing material: never commit these ---------------------------
+key.properties
+*.jks
+*.keystore
+
+# --- Flutter build output ---------------------------------------------------
+app/build/
+app/dist/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+
+# --- Node -------------------------------------------------------------------
+server/node_modules/
+server/data/
+server/*.log

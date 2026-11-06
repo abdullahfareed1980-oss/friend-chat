@@ -1,0 +1,41 @@
+# Friend Chat Server + Caddy for automatic TLS.
+#
+#   cp .env.example .env   # set the two seed passwords
+#   docker compose run --rm server npm run seed
+#   docker compose up -d
+#
+# Caddy obtains a certificate for your domain, so the phones can use wss://
+# and your messages are encrypted on the wire as well as end-to-end.
+
+services:
+  server:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "8787"
+    volumes:
+      - ./data:/data
+    expose:
+      - "8787"
+    # Uncomment to reach the server directly on the LAN while testing.
+    # ports:
+    #   - "8787:8787"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

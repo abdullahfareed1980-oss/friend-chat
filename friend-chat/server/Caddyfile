@@ -1,0 +1,32 @@
+# Replace chat.example.com with your own domain and point its DNS A record at
+# this machine. Caddy provisions and renews the certificate automatically.
+#
+# WebSocket upgrade is handled by Caddy out of the box, so the phone can use
+#   wss://chat.example.com/socket.io/?EIO=4&transport=websocket
+
+chat.example.com {
+	encode zstd gzip
+
+	# Long-lived WebSocket connections need no buffering.
+	reverse_proxy server:8787 {
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# This is a private pair of phones, not a website.
+		-Server
+	}
+
+	log {
+		# Caddy's own access log stays on your disk; disable it entirely with
+		# `output discard` if you would rather keep no HTTP logs at all.
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}

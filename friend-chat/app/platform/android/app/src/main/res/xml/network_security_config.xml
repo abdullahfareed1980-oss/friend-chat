@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Friend Chat talks to http://<lan-ip>:8787 on your own network, which Android 9+
+  blocks by default. Cleartext stays off for everything else.
+
+  <domain> entries match exact host strings, so add the IP your server actually
+  has while you are on Wi-Fi, e.g.:
+
+      <domain includeSubdomains="false">192.168.1.57</domain>
+
+  Tailscale addresses (100.x.y.z) must be added the same way, one IP per entry.
+  A CIDR range is not supported by this file format.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">192.168.1.0</domain>
+    </domain-config>
+</network-security-config>

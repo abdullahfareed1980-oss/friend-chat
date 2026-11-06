@@ -1,0 +1,23 @@
+{
+  "name": "friend-chat-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Friend Chat Server - a private, self-hosted, real-time messaging server for exactly two people.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/seed.js",
+    "test": "node --test --test-reporter=spec test/"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

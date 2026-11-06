@@ -1,0 +1,199 @@
+name: Build installers
+
+# Tag `v1.2.3` -> signed Android APKs + FriendChatSetup-1.2.3.exe attached to a
+# GitHub Release. Manual runs build the same artefacts without publishing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp (defaults to pubspec.yaml, e.g. 1.0.0)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: "3.47.9"
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: friend-chat/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${INPUT_VERSION:-}" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="$(sed -n 's/^version:[[:space:]]*\([0-9][^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER:-1}" >> "$GITHUB_OUTPUT"
+          echo "Building Friend Chat $VERSION (${GITHUB_RUN_NUMBER:-1})"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # Generates android/ (this repo does not track it) and applies the manifest,
+      # network policy and signing config from app/platform/.
+      - name: Prepare platform folders
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./tools/prepare_platform.sh
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: Build release APKs
+        run: |
+          set -euo pipefail
+          flutter build apk --release --split-per-abi \
+            --build-name "${{ steps.version.outputs.version }}" \
+            --build-number "${{ steps.version.outputs.code }}"
+
+      - name: Collect artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/dist/apk"
+          mkdir -p "$OUT"
+          shopt -s nullglob
+          for f in build/app/outputs/flutter-apk/*-release*.apk; do
+            abi="$(basename "$f" .apk)"
+            abi="${abi#app-}"
+            abi="${abi%-release-unsigned}"
+            abi="${abi%-release}"
+            cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}-${abi}.apk"
+          done
+          ls -lh "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/apk/*.apk
+          if-no-files-found: error
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: friend-chat/app
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${INPUT_VERSION:-}" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="$(sed -n 's/^version:[[:space:]]*\([0-9][^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=${GITHUB_RUN_NUMBER:-1}" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Prepare platform folders
+        run: ./tools/prepare_platform.sh
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # flutter does not cross-compile desktop apps: this must run on Windows.
+      - name: Build Windows release
+        run: |
+          set -euo pipefail
+          flutter build windows --release \
+            --build-name "${{ steps.version.outputs.version }}" \
+            --build-number "${{ steps.version.outputs.code }}"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile installer
+        run: |
+          set -euo pipefail
+          # The checked-in script carries a default version; stamp it on the runner
+          # copy only, so a tag never leaves the repo dirty.
+          sed -i 's/^#define AppVersion .*/#define AppVersion     "${{ steps.version.outputs.version }}"/' \
+            windows/installer/friend-chat.iss
+          grep '^#define AppVersion' windows/installer/friend-chat.iss
+
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          [ -x "$ISCC" ] || ISCC="iscc"
+          "$ISCC" windows/installer/friend-chat.iss
+
+          ls -lh dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: friend-chat/app/dist/*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [android, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach artefacts to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -lhR dist
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            # Re-running a tag build updates the assets instead of failing.
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --title "Friend Chat ${GITHUB_REF_NAME#v}" \
+              --generate-notes
+          fi
