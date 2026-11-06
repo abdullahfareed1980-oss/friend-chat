@@ -59,8 +59,6 @@ jobs:
           channel: stable
           cache: true
 
-      # Generates android/ (this repo does not track it) and applies the manifest,
-      # network policy and signing config from app/platform/.
       - name: Prepare platform folders
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -113,7 +111,8 @@ jobs:
 
       - name: Resolve version
         id: version
-        id_inputs: ${{ inputs.version }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +138,6 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
-      # flutter does not cross-compile desktop apps: this must run on Windows.
       - name: Build Windows release
         run: |
           set -euo pipefail
@@ -153,8 +151,6 @@ jobs:
       - name: Compile installer
         run: |
           set -euo pipefail
-          # The checked-in script carries a default version; stamp it on the runner
-          # copy only, so a tag never leaves the repo dirty.
           sed -i 's/^#define AppVersion .*/#define AppVersion    "${{ steps.version.outputs.version }}"/' \
             windows/installer/friend-chat.iss
           grep '^#define AppVersion' windows/installer/friend-chat.iss
@@ -189,7 +185,6 @@ jobs:
           set -euo pipefail
           ls -lhR dist
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            # Re-running a tag build updates the assets instead of failing.
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" dist/* \
