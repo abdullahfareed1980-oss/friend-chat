@@ -1,5 +1,8 @@
 name: Build installers
 
+# Tag `v1.2.3` -> signed Android APKs + FriendChatSetup-1.2.3.exe attached to a
+# GitHub Release. Manual runs build the same artefacts without publishing.
+
 on:
   push:
     tags:
@@ -16,10 +19,140 @@ permissions:
 
 env:
   FLUTTER_VERSION: "3.47.9"
+  # Release gate: instrumented coverage below this fails `checks`, and both
+  # build jobs need `checks`, so a tag publishes nothing. Raise it when a file
+  # reaches 100% rather than leaving the slack there forever.
+  COVERAGE_FLOOR: "99.0"
 
 jobs:
+  # Both builds need this, so a tag whose code does not analyse, whose tests
+  # fail, or whose coverage falls under the floor publishes nothing.
+  checks:
+    name: Analyze + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: friend-chat/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # The live-server E2E test spawns `node server/src/index.js`, so this job
+      # needs Node 22+ (node:sqlite) and the server's dependencies.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: friend-chat/server/package-lock.json
+
+      - name: Install server dependencies
+        working-directory: friend-chat/server
+        run: npm ci --no-audit --no-fund
+
+      # No platform folders or Android SDK are needed for this job.
+      - name: flutter pub get
+        run: flutter pub get
+
+      # Fails on errors and warnings, not just on a non-zero compile.
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      # FC_E2E_REQUIRED turns a missing Node/server into a failure instead of a
+      # silent skip, so this gate cannot pass without running the E2E tests.
+      - name: Test
+        env:
+          FC_E2E_REQUIRED: "1"
+        run: flutter test --reporter expanded --coverage
+
+      - name: Coverage summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          LCOV=coverage/lcov.info
+          [ -f "$LCOV" ] || { echo "::error::flutter test --coverage did not write $LCOV"; exit 1; }
+
+          # One row per file: percentage, path, lines hit, lines found.
+          awk '
+            /^SF:/ { f = substr($0, 4); sub(/^.*\/lib\//, "lib/", f) }
+            /^LF:/ { lf = substr($0, 4) + 0 }
+            /^LH:/ { lh = substr($0, 4) + 0; printf "%.1f\t%s\t%d\t%d\n", (lf ? 100 * lh / lf : 0), f, lh, lf }
+          ' "$LCOV" | sort -n > coverage/rows.tsv
+
+          read -r hit total < <(awk -F'\t' '{ h += $3; t += $4 } END { printf "%d %d\n", h, t }' coverage/rows.tsv)
+          pct=$(awk -v h="$hit" -v t="$total" 'BEGIN { printf "%.1f", (t ? 100 * h / t : 0) }')
+          # Handed to the floor check as a file rather than recomputed there, so
+          # the number that fails a build is exactly the number the summary and
+          # the HTML report show.
+          echo "$pct" > coverage/pct.txt
+          loaded=$(wc -l < coverage/rows.tsv | tr -d ' ')
+          all=$(find lib -name '*.dart' | wc -l | tr -d ' ')
+
+          # Only files a test actually loads appear in lcov, so say so rather
+          # than reporting a number that pretends the screens are covered.
+          {
+            echo "### Test coverage"
+            echo
+            echo "**${pct}% of ${total} instrumented lines** (${hit} hit) — \`flutter test --coverage\` in the same job."
+            echo
+            echo "\`${loaded}\` of \`${all}\` \`lib/\` files were loaded by the suite; the other \`$((all - loaded))\` (mostly screens) cannot be scored here."
+            echo
+            echo "| File | Lines |"
+            echo "| --- | --- |"
+            awk -F'\t' '{ printf "| `%s` | %s%% (%d/%d) |\n", $2, $1, $3, $4 }' coverage/rows.tsv
+          } > coverage/summary.md
+
+          cat coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Per-line, browsable report. tools/coverage_html.dart is plain Dart so no
+      # lcov/genhtml install is needed on the runner.
+      - name: Coverage report (HTML)
+        run: |
+          set -euo pipefail
+          dart run tools/coverage_html.dart coverage/lcov.info coverage/html
+          {
+            echo
+            echo "<sub>Per-line HTML: download the <code>coverage-html</code> artifact from this run and open <code>index.html</code>.</sub>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            friend-chat/app/coverage/lcov.info
+            friend-chat/app/coverage/summary.md
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: friend-chat/app/coverage/html
+          if-no-files-found: error
+
+      # Last on purpose: the summary and both artifacts are published before this
+      # can fail, so a red run still tells you which lines were lost. The gate is
+      # on the total, not on 100%, because `crypto_service.dart` still carries two
+      # unused helpers — see docs/BUILD.md for what the number does and does not
+      # mean before making it stricter.
+      - name: Coverage floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -s coverage/pct.txt ] || { echo "::error::coverage/pct.txt is missing — did the coverage summary step run?"; exit 1; }
+          pct=$(cat coverage/pct.txt)
+          echo "instrumented coverage: ${pct}% (floor ${COVERAGE_FLOOR}%)"
+          if awk -v p="$pct" -v floor="$COVERAGE_FLOOR" 'BEGIN { exit !(p + 0 < floor + 0) }'; then
+            echo "::error::coverage ${pct}% is below the ${COVERAGE_FLOOR}% floor. Cover the new lines, or delete the dead ones — do not lower the floor in the same commit."
+            exit 1
+          fi
+
   android:
     name: Android APK
+    needs: checks
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,31 +189,23 @@ jobs:
           channel: stable
           cache: true
 
+      # Generates android/ (this repo does not track it) and applies the manifest,
+      # network policy and signing config from app/platform/.
       - name: Prepare platform folders
-        run: bash tools/prepare_platform.sh
-
-      - name: Force Fix Android Compile SDK for Plugins
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Checking and updating build.gradle files..."
-          find . -name "build.gradle" | while read -r file; do
-            if grep -q "compileSdkVersion" "$file" || grep -q "compileSdk" "$file"; then
-              sed -i 's/compileSdkVersion[[:space:]]*[0-9]*/compileSdkVersion 36/g' "$file"
-              sed -i 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]*/compileSdk = 36/g' "$file"
-              sed -i 's/targetSdkVersion[[:space:]]*[0-9]*/targetSdkVersion 36/g' "$file"
-              sed -i 's/targetSdk[[:space:]]*=[[:space:]]*[0-9]*/targetSdk = 36/g' "$file"
-              echo "Updated $file"
-            fi
-          done
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./tools/prepare_platform.sh
 
       - name: flutter pub get
         run: flutter pub get
 
-      - name: Build debug APKs
+      - name: Build release APKs
         run: |
           set -euo pipefail
-          flutter build apk --debug \
+          flutter build apk --release --split-per-abi \
             --build-name "${{ steps.version.outputs.version }}" \
             --build-number "${{ steps.version.outputs.code }}"
 
@@ -91,8 +216,11 @@ jobs:
           OUT="$GITHUB_WORKSPACE/dist/apk"
           mkdir -p "$OUT"
           shopt -s nullglob
-          for f in build/app/outputs/flutter-apk/*.apk; do
+          for f in build/app/outputs/flutter-apk/*-release*.apk; do
             abi="$(basename "$f" .apk)"
+            abi="${abi#app-}"
+            abi="${abi%-release-unsigned}"
+            abi="${abi%-release}"
             cp "$f" "$OUT/friend-chat-${{ steps.version.outputs.version }}-${abi}.apk"
           done
           ls -lh "$OUT"
@@ -105,6 +233,7 @@ jobs:
 
   windows:
     name: Windows installer
+    needs: checks
     runs-on: windows-latest
     defaults:
       run:
@@ -137,11 +266,12 @@ jobs:
           cache: true
 
       - name: Prepare platform folders
-        run: bash tools/prepare_platform.sh
+        run: ./tools/prepare_platform.sh
 
       - name: flutter pub get
         run: flutter pub get
 
+      # flutter does not cross-compile desktop apps: this must run on Windows.
       - name: Build Windows release
         run: |
           set -euo pipefail
@@ -155,7 +285,9 @@ jobs:
       - name: Compile installer
         run: |
           set -euo pipefail
-          sed -i 's/^#define AppVersion .*/#define AppVersion    "${{ steps.version.outputs.version }}"/' \
+          # The checked-in script carries a default version; stamp it on the runner
+          # copy only, so a tag never leaves the repo dirty.
+          sed -i 's/^#define AppVersion .*/#define AppVersion     "${{ steps.version.outputs.version }}"/' \
             windows/installer/friend-chat.iss
           grep '^#define AppVersion' windows/installer/friend-chat.iss
 
@@ -177,10 +309,30 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # Installers first; the coverage reports come in as separate downloads so
+      # `dist/*` never picks up a report by accident.
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: "{android-apk,windows-installer}"
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage-html
+
+      - name: Package the HTML coverage report
+        run: |
+          set -euo pipefail
+          ls coverage-html
+          ( cd coverage-html && zip -qr "../friend-chat-coverage-${GITHUB_REF_NAME#v}.zip" . )
+          ls -lh friend-chat-coverage-*.zip
 
       - name: Attach artefacts to the release
         env:
@@ -188,10 +340,94 @@ jobs:
         run: |
           set -euo pipefail
           ls -lhR dist
+          ZIP="friend-chat-coverage-${GITHUB_REF_NAME#v}.zip"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            # Re-running a tag build updates the assets instead of failing.
+            gh release upload "$GITHUB_REF_NAME" dist/* "$ZIP" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/* \
+            gh release create "$GITHUB_REF_NAME" dist/* "$ZIP" \
               --title "Friend Chat ${GITHUB_REF_NAME#v}" \
               --generate-notes
           fi
+
+      # Coverage goes where the installers are. The sentinels let a re-run of the
+      # same tag replace the numbers instead of stacking a second copy.
+      - name: Publish coverage in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ -f coverage/summary.md ] || { echo "::error::coverage/summary.md is missing"; exit 1; }
+
+          # Canonical Pages URL, without needing the deployment job's output.
+          OWNER="$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [ "${REPO,,}" = "${OWNER}.github.io" ]; then
+            PAGES="https://${OWNER}.github.io/"
+          else
+            PAGES="https://${OWNER}.github.io/${REPO}/"
+          fi
+
+          gh release view "$GITHUB_REF_NAME" --json body -q .body > notes.md
+          # Drop any previous coverage block, and the blank lines before it, so
+          # re-running a tag rewrites the notes instead of growing them.
+          awk '
+            /<!-- coverage:start -->/ { skip = 1 }
+            /<!-- coverage:end -->/   { skip = 0; next }
+            !skip { kept[n++] = $0 }
+            END {
+              last = n - 1
+              while (last >= 0 && kept[last] ~ /^[[:space:]]*$/) last--
+              for (i = 0; i <= last; i++) print kept[i]
+            }
+          ' notes.md > notes.clean.md
+
+          {
+            cat notes.clean.md
+            printf '\n<!-- coverage:start -->\n\n'
+            cat coverage/summary.md
+            printf '\nPer-line HTML: <%s> (refreshed on every tag), also packaged as `friend-chat-coverage-%s.zip` here.\n' "$PAGES" "${GITHUB_REF_NAME#v}"
+            printf '_The raw `lcov.info` and the unpacked report stay on the workflow run._\n\n<!-- coverage:end -->\n'
+          } > notes.new.md
+
+          gh release edit "$GITHUB_REF_NAME" --notes-file notes.new.md
+
+  # Separate job on purpose: installers must ship even if Pages is not enabled
+  # yet or the deployment breaks. Requires Settings -> Pages -> Source =
+  # "GitHub Actions" once; without it this job fails here, not the release.
+  coverage-pages:
+    name: Publish coverage to Pages
+    needs: [checks]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+      actions: read # read this run's coverage-html artifact
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage-html
+          path: coverage-html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage-html
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Link it
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Living coverage report: ${{ steps.deploy.outputs.page_url }}" >> "$GITHUB_STEP_SUMMARY"

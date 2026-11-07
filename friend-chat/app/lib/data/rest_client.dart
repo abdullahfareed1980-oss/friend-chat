@@ -83,14 +83,22 @@ class SyncPage {
 }
 
 class ApiClient {
-  ApiClient({required this.baseUrl, this.token});
+  ApiClient({
+    required this.baseUrl,
+    this.token,
+    http.Client? client,
+    this.timeout = const Duration(seconds: 15),
+  }) : _client = client ?? http.Client();
 
   /// HTTP origin, e.g. `http://192.168.1.40:8787`.
   final String baseUrl;
   String? token;
 
-  final _client = http.Client();
-  static const _timeout = Duration(seconds: 15);
+  /// Per-request ceiling for the JSON endpoints. Injectable so a test can
+  /// prove a hung server surfaces as [TimeoutException] without waiting 15s.
+  final Duration timeout;
+
+  final http.Client _client;
 
   Map<String, String> _headers({bool json = true}) => {
         if (json) 'content-type': 'application/json',
@@ -111,17 +119,17 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? query}) async {
-    final res = await _client.get(_uri(path, query), headers: _headers(json: false)).timeout(_timeout);
+    final res = await _client.get(_uri(path, query), headers: _headers(json: false)).timeout(timeout);
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
-    final res = await _client.post(_uri(path), headers: _headers(), body: jsonEncode(body)).timeout(_timeout);
+    final res = await _client.post(_uri(path), headers: _headers(), body: jsonEncode(body)).timeout(timeout);
     return _decode(res);
   }
 
   Future<Map<String, dynamic>> _put(String path, Map<String, dynamic> body) async {
-    final res = await _client.put(_uri(path), headers: _headers(), body: jsonEncode(body)).timeout(_timeout);
+    final res = await _client.put(_uri(path), headers: _headers(), body: jsonEncode(body)).timeout(timeout);
     return _decode(res);
   }
 

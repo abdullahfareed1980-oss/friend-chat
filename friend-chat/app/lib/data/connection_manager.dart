@@ -24,21 +24,52 @@ import 'rest_client.dart';
 
 typedef EndpointLoader = Future<List<ServerEndpoint>> Function();
 typedef EndpointPersister = Future<void> Function(ServerEndpoint endpoint);
+typedef EndpointProber = Future<void> Function(String httpBase);
+
+/// The two things this class needs from `connectivity_plus`, behind a seam so
+/// the network-change path and the watchdog can be driven from a test.
+/// [Connectivity] itself is a concrete singleton and cannot be substituted.
+abstract class NetworkWatcher {
+  Future<List<ConnectivityResult>> check();
+  Stream<List<ConnectivityResult>> get changes;
+}
+
+class PluginNetworkWatcher implements NetworkWatcher {
+  PluginNetworkWatcher([Connectivity? connectivity]) : _connectivity = connectivity ?? Connectivity();
+
+  final Connectivity _connectivity;
+
+  @override
+  Future<List<ConnectivityResult>> check() => _connectivity.checkConnectivity();
+
+  @override
+  Stream<List<ConnectivityResult>> get changes => _connectivity.onConnectivityChanged;
+}
 
 class ConnectionManager {
   ConnectionManager({
     required this.loadCandidates,
     required this.persistChoice,
-    Connectivity? connectivity,
+    NetworkWatcher? network,
+    EndpointProber? prober,
     this.probeTimeout = const Duration(seconds: 3),
     this.cacheFor = const Duration(seconds: 30),
-  }) : _connectivity = connectivity ?? Connectivity();
+    this.watchdogInterval = const Duration(seconds: 45),
+  })  : _networkWatcher = network ?? PluginNetworkWatcher(),
+        _prober = prober ?? ApiClient.health;
 
   final EndpointLoader loadCandidates;
   final EndpointPersister persistChoice;
-  final Connectivity _connectivity;
+  final NetworkWatcher _networkWatcher;
+
+  /// The reachability check, injectable so the racing logic can be tested
+  /// without a server. Defaults to `GET /api/health`.
+  final EndpointProber _prober;
   final Duration probeTimeout;
   final Duration cacheFor;
+
+  /// How often [start] re-checks the chosen endpoint (or looks for one).
+  final Duration watchdogInterval;
 
   final ValueNotifier<ConnectionInfo> info =
       ValueNotifier(const ConnectionInfo(status: ConnectionStatus.offline));
@@ -64,15 +95,15 @@ class ConnectionManager {
 
   Future<void> start() async {
     if (_networkSub != null) return; // idempotent
-    _network = await _connectivity.checkConnectivity();
-    _networkSub = _connectivity.onConnectivityChanged.listen((result) async {
+    _network = await _networkWatcher.check();
+    _networkSub = _networkWatcher.changes.listen((result) async {
       final changed = !listEquals(result, _network);
       _network = result;
       _networkChanges.add(result);
       if (changed) await reRace(reason: 'network changed');
     });
 
-    _watchdog = Timer.periodic(const Duration(seconds: 45), (_) async {
+    _watchdog = Timer.periodic(watchdogInterval, (_) async {
       if (_current == null) {
         await reRace(reason: 'watchdog');
       } else {
@@ -195,7 +226,7 @@ class ConnectionManager {
   Future<_ProbeResult?> _probe(ServerEndpoint endpoint) async {
     final stopwatch = Stopwatch()..start();
     try {
-      await ApiClient.health(endpoint.httpBase).timeout(probeTimeout);
+      await _prober(endpoint.httpBase).timeout(probeTimeout);
       stopwatch.stop();
       return _ProbeResult(endpoint, stopwatch.elapsedMilliseconds);
     } catch (_) {

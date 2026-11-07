@@ -231,8 +231,155 @@ friend-chat-1.0.0-x86_64.apk                     ← emulators
 A manual run (Actions → Build installers → Run workflow) builds the same files
 without publishing a Release, and accepts a version override.
 
+Before either build starts, a `checks` job runs `flutter analyze`, `flutter test`
+and a coverage floor check on the same pinned Flutter. `flutter analyze` exits
+non-zero on errors *and* warnings, and both build jobs declare `needs: checks`,
+so a tag whose code does not analyse, whose tests fail, or whose instrumented
+coverage is under 99% publishes nothing — no half-built release, no installer
+that cannot decrypt. The floor is `COVERAGE_FLOOR` at the top of the workflow;
+see [Coverage](#coverage) for what it does and does not measure.
+
+The suite in [`app/test/`](../app/test) is 165 tests over the pieces that are
+expensive to debug on a phone:
+
+* `models_test.dart` (70) — every model's JSON round trip (user, attachment,
+  catalog item and snapshot, message, envelope, quick reply, label, auto-reply
+  settings, endpoint) plus the wire parsing the app relies on when the server
+  sends something unexpected: unknown `kind`/`status` names, missing optional
+  fields, non-map sections, an unparseable `createdAt` (falls back to now so the
+  bubble still sorts), invalid hex colours. Also the display helpers: initials,
+  relative time, clock, byte sizes, currency labels, away-window arithmetic.
+  This file caught two real bugs: `AutoReplySettings.fromJson({})` threw on the
+  first-launch path (a const empty map is not a `Map<String, dynamic>`), and
+  `kindToWire` had no test proving it matches what `fromWire` parses.
+
+* `crypto_service_test.dart` (14) — envelope round-trip, tamper detection (a
+  flipped byte must not decrypt), sender/conversation binding, identity
+  persistence and corruption handling, attachment sealing, safety-number
+  symmetry.
+* `connection_manager_test.dart` (20) — LAN beats a faster public endpoint,
+  lowest RTT wins within a kind, probes run in parallel, offline paths, cache
+  reuse, re-race after `reportFailure`, `advancePast`, `reportOnline` merging
+  peer state. Plus the parts that need the OS: a fake `NetworkWatcher` shows
+  that `start()` is idempotent, that a transport change is published to the UI
+  and re-races, that `isOnMobileData` is true only when cellular is the sole
+  transport, and that the watchdog (interval injectable, 20 ms in tests) looks
+  for a server when there is none, refreshes the badge when there is, and demotes
+  an endpoint whose health check fails. One test drives the real
+  `PluginNetworkWatcher` through mocked plugin channels, so the wiring to
+  `connectivity_plus` is exercised rather than assumed.
+* `rest_client_test.dart` (24) — the HTTP client against a scripted
+  `http.Client`, so the promises that are invisible in a green E2E run are
+  asserted directly: `no-store` on every request, `authorization` only when
+  signed in, JSON content type on POST/PUT but not GET, octet-stream plus the
+  `x-fc-media` digest header on media upload, raw bytes back on download. Error
+  bodies map to `ApiException` with status/code/hint, a bodyless 500 becomes
+  `http_500`, 401/403 are recognisable as auth failures, and a failed media
+  download reports `media_fetch_failed` instead of returning empty bytes. A
+  server that never answers becomes `TimeoutException` rather than a spinner
+  that lives forever — that test needs a 20 ms injected timeout, which is why
+  `ApiClient` takes an optional `client` and `timeout` (the constructor still
+  defaults to a real socket and 15 s). Also the request shapes nothing else
+  exercises: password login with and without the device block, `me()` injecting
+  the stored token, sync's `latestSeq` fallback, a null peer directory entry.
+* `e2e/live_server_test.dart` (15) — no fakes: it spawns `server/src/index.js` on
+  port 0 with a throwaway data directory, seeds both accounts through
+  `src/seed.js`, then drives the real `ApiClient` the app uses — health, request
+  OTP, verify, `/api/me`, peer directory and identity keys, sync, business docs
+  with revision conflicts, the peer catalog, media upload/download with checksum
+  rejection, and the 400/401/404/409 paths. Message *delivery* is not here: sends
+  go over Socket.io and are covered by `cd server && npm test`.
+* `tools/coverage_html_test.dart` (22) — the coverage report generator itself:
+  lcov parsing (repeated `DA:` records, junk lines, CRLF, no records), source
+  path handling (relative, `./`, absolute, trailing slash, Windows separators,
+  paths outside the root), every failure exit, and the HTML it writes (hit/miss/
+  neutral rows, escaping, link depth from nested pages, rounding, empty files).
+  It calls `buildReport()` in-process instead of spawning `dart`, which is why
+  the tool separates that from `main()`.
+
+The E2E file needs `node` >= 22.5 and `server/node_modules`. Run `npm ci` in
+`server/` once; without it the file skips with a message so the unit suite still
+works. CI installs them and sets `FC_E2E_REQUIRED=1`, which turns that skip into
+a failure so the gate cannot pass by skipping. If you write another live test,
+note it must clear `HttpOverrides.global`: `flutter_test` otherwise answers every
+HTTP request with 400 to keep widget tests offline.
+
 The tag supplies the version: `v1.2.3` becomes `versionName 1.2.3` in the APK and
 `FriendChatSetup-1.2.3.exe` from Inno Setup. The build number is the run number.
+
+### Coverage
+
+`checks` runs `flutter test --coverage` and publishes the result three ways:
+
+* **Run summary** — the percentage and per-file table sit at the bottom of the
+  workflow run page, so seeing the number needs no download at all.
+* **`coverage-html` artifact** — a browsable per-line report: `index.html` lists
+  every file worst-first, and each file page shows the source with hit counts,
+  covered lines in mint and misses in rose. Download it from the run's
+  Artifacts section and open `index.html`; it is fully self-contained.
+* **Release** — a tagged build appends the table to the release notes (between
+  `<!-- coverage:start -->` / `<!-- coverage:end -->` sentinels, so re-running a
+  tag replaces those numbers instead of stacking a second copy) and attaches the
+  packaged report as `friend-chat-coverage-<version>.zip`. The raw
+  `coverage/lcov.info` and the unpacked HTML stay on the workflow run.
+* **GitHub Pages** — on a tagged build, `Publish coverage to Pages` deploys the
+  same report to `https://<owner>.github.io/<repo>/`, so reviewers get a link
+  rather than a download. The release notes carry that URL.
+* **A floor that fails the build** — the last step of `checks` compares the total
+  against `COVERAGE_FLOOR` (`99.0` in the workflow `env`) and exits non-zero under
+  it, with `::error::` naming the number. Because both build jobs need `checks`,
+  a tag that trips it publishes no APK and no installer. It reads the percentage
+  the summary step wrote to `coverage/pct.txt` rather than recomputing it, so the
+  number that fails a build is exactly the number in the table above it.
+
+  The gate is the *last* step on purpose: the summary, the lcov file and both
+  HTML artifacts are already uploaded, so a red run still tells you which lines
+  went missing instead of failing before there is anything to look at. The floor
+  is a single total, not per-file, because a per-file rule would fail on files the
+  suite is not meant to load. Raise it — in a commit of its own, never in the
+  same change that loses coverage — as the remaining gap closes; lowering it to
+  turn a build green is the one edit that makes the number worthless.
+
+Pages needs one switch, once: **Settings → Pages → Build and deployment →
+Source = GitHub Actions**. Until that is set the Pages job fails with GitHub's
+own "Pages is not enabled" message — and the release still publishes, because
+that job is deliberately not a dependency of `release`; the installers are the
+product and a missing report must not block them.
+
+> **Privacy note.** A Pages site built from a *private* repository is still
+> public. The report contains source lines from `lib/`. If you would rather not
+> publish those, leave Pages off — the artifact, the release zip and the summary
+> table all keep working unchanged.
+
+The HTML is generated by [`app/tools/coverage_html.dart`](../app/tools/coverage_html.dart),
+a dependency-free lcov reader. `genhtml` would mean installing lcov on the
+runner and on every dev machine, for a report whose job is only to answer
+"which lines did the tests touch".
+
+One caveat before quoting the number: `flutter test --coverage` only records
+files a test actually loads, so the total covers the small number of `lib/`
+files the suite reaches (currently 4 of 30: models, REST client, crypto service,
+connection manager) — and both the summary and the HTML say so, rather than
+showing screens as 0%. Of those four, `models.dart` (323/323),
+`connection_manager.dart` (103/103) and `rest_client.dart` (99/99) are at 100%,
+`crypto_service.dart` is at 95% — its five uncovered lines are two helpers
+nothing calls any more (an `identityPublicKey` getter and
+`hasNetworkInterface`), not untested behaviour — and the report as a whole is at
+99.2%; the number only means anything because the rest of `lib/` — screens and
+platform services — is not instrumented at all. `tools/` is outside `lib/` for
+the same reason it is outside the app bundle, so the generator's own 22 tests
+are not in the report even though they run in the same job.
+
+Locally:
+
+```bash
+cd app
+flutter test --coverage                 # writes coverage/lcov.info (gitignored)
+dart run tools/coverage_html.dart       # writes coverage/html/index.html
+open coverage/html/index.html           # xdg-open on Linux
+
+flutter test test/tools/coverage_html_test.dart   # the generator's own tests
+```
 
 ### Signing secrets
 

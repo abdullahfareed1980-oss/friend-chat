@@ -591,8 +591,14 @@ class AutoReplySettings {
       };
 
   factory AutoReplySettings.fromJson(Map<String, dynamic> json) {
-    final greeting = (json['greeting'] ?? const {}) as Map<String, dynamic>;
-    final away = (json['away'] ?? const {}) as Map<String, dynamic>;
+    // Tolerate a missing section, and a section that is not a map at all:
+    // settings are re-read on every launch, so a bad cache must not crash.
+    final greeting = json['greeting'] is Map
+        ? Map<String, dynamic>.from(json['greeting'] as Map)
+        : const <String, dynamic>{};
+    final away = json['away'] is Map
+        ? Map<String, dynamic>.from(json['away'] as Map)
+        : const <String, dynamic>{};
     return AutoReplySettings(
       greetingEnabled: greeting['enabled'] == true,
       greetingText: (greeting['text'] ?? '') as String,

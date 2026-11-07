@@ -12,6 +12,7 @@ key.properties
 # --- Flutter build output ---------------------------------------------------
 app/build/
 app/dist/
+app/coverage/
 app/.dart_tool/
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
