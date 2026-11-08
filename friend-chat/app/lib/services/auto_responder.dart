@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import '../data/local_store.dart';
+import '../data/meta_store.dart';
 import '../models/models.dart';
 
 /// ---------------------------------------------------------------------------
@@ -17,12 +17,12 @@ class AutoResponder {
   static const _settingsKey = 'autoReply';
   static String _lastKey(String kind) => 'autoReplyLast_$kind';
 
-  Future<void> load(LocalStore store) async {
+  Future<void> load(MetaStore store) async {
     final map = store.readMetaMap(_settingsKey);
     if (map != null) settings = AutoReplySettings.fromJson(map);
   }
 
-  Future<void> save(LocalStore store, AutoReplySettings next) async {
+  Future<void> save(MetaStore store, AutoReplySettings next) async {
     settings = next;
     await store.writeMeta(_settingsKey, next.toJson());
   }
@@ -37,7 +37,7 @@ class AutoResponder {
   Future<String?> decide({
     required DateTime now,
     required bool conversationRestarted,
-    required LocalStore store,
+    required MetaStore store,
   }) async {
     if (settings.awayEnabled &&
         settings.awaySchedule.isActiveAt(now) &&
@@ -58,7 +58,7 @@ class AutoResponder {
     return null;
   }
 
-  Future<bool> _cooldownPassed(LocalStore store, String kind, DateTime now) async {
+  Future<bool> _cooldownPassed(MetaStore store, String kind, DateTime now) async {
     final raw = store.readMeta<String>(_lastKey(kind));
     if (raw == null) return true;
     final last = DateTime.tryParse(raw);
@@ -66,7 +66,7 @@ class AutoResponder {
     return now.difference(last).inHours >= settings.cooldownHours;
   }
 
-  Future<void> _stamp(LocalStore store, String kind, DateTime now) =>
+  Future<void> _stamp(MetaStore store, String kind, DateTime now) =>
       store.writeMeta(_lastKey(kind), now.toIso8601String());
 
   /// Shown in the Business tab summary card.

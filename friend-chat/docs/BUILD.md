@@ -231,15 +231,29 @@ friend-chat-1.0.0-x86_64.apk                     ← emulators
 A manual run (Actions → Build installers → Run workflow) builds the same files
 without publishing a Release, and accepts a version override.
 
-Before either build starts, a `checks` job runs `flutter analyze`, `flutter test`
-and a coverage floor check on the same pinned Flutter. `flutter analyze` exits
-non-zero on errors *and* warnings, and both build jobs declare `needs: checks`,
-so a tag whose code does not analyse, whose tests fail, or whose instrumented
-coverage is under 99% publishes nothing — no half-built release, no installer
-that cannot decrypt. The floor is `COVERAGE_FLOOR` at the top of the workflow;
-see [Coverage](#coverage) for what it does and does not measure.
+Before either build starts, a `checks` job lints the workflow files, then runs
+`flutter analyze`, `flutter test` and a coverage floor check on the same pinned
+Flutter. `flutter analyze` exits non-zero on errors *and* warnings, and both build
+jobs declare `needs: checks`, so a tag whose code does not analyse, whose tests
+fail, or whose instrumented coverage is under 100% publishes nothing — no
+half-built release, no installer that cannot decrypt. The floor is
+`COVERAGE_FLOOR` at the top of the workflow; see [Coverage](#coverage) for what it
+does and does not measure.
 
-The suite in [`app/test/`](../app/test) is 165 tests over the pieces that are
+The first of those steps, **Lint workflow files**, downloads a pinned actionlint
+(`1.7.12`, never `main`) and points it at `.github/workflows/*.yml`. actionlint
+parses the YAML against GitHub's schema and hands every `run:` block to
+shellcheck, so a mistyped runner label, an unknown expression context or a
+quoting bug in a script fails the job in seconds — before Flutter is even set up.
+It insists on shellcheck being present, since without it actionlint silently skips
+the scripts and the check would pass while linting almost nothing. To run it
+locally: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+
+That lint only runs when this workflow runs, and this workflow fires on `v*` tags
+and manual dispatch — so it cannot catch a bad workflow edit *before* you tag;
+run the container above when you touch `.github/`.
+
+The suite in [`app/test/`](../app/test) is 194 tests over the pieces that are
 expensive to debug on a phone:
 
 * `models_test.dart` (70) — every model's JSON round trip (user, attachment,
@@ -282,6 +296,28 @@ expensive to debug on a phone:
   defaults to a real socket and 15 s). Also the request shapes nothing else
   exercises: password login with and without the device block, `me()` injecting
   the stored token, sync's `latestSeq` fallback, a null peer directory entry.
+* `auto_responder_test.dart` (14) — the away/greeting rules on a fixed clock:
+  the away window (inside, outside, overnight), a blank text sending nothing,
+  the per-kind cooldown holding a repeat back and releasing it once it lapses,
+  an unreadable stamp treated as no cooldown, greeting only on a restarted
+  conversation and only on its own cooldown, away winning when both are due.
+  Settings load/save round trip, and `statusLine` for all four combinations.
+  This needed one seam: `AutoResponder` takes a `MetaStore` (read/write meta)
+  instead of a concrete `LocalStore`, so the test uses a map and no Hive box,
+  keystore key or plugin channel — the same seam idea as `NetworkWatcher`. It
+  lives in its own file so a test can import the interface without loading the
+  Hive-backed store and its file IO.
+* `local_store_test.dart` (15) — the encrypted store itself, opened into a
+  temporary directory through `open(..., path:)`. The Aes boxes are real, so
+  these prove the round trip the app performs on every launch: put/get by uuid
+  and client id, per-conversation filtering, seq ordering with a `createdAt`
+  fallback for outbox rows that have no cursor yet, batch writes, delete (which
+  also drops the seq entry), cursor precedence (stored value, else highest seq,
+  with a non-int falling through), typed meta reads including type mismatches,
+  map/list readers that filter junk shapes, `removeMeta`, and the JSON export
+  with and without a stored conversation. The last test calls `open()` with no
+  path and answers the `path_provider` channel by hand, so the real
+  `Hive.initFlutter()` branch runs instead of being skipped.
 * `e2e/live_server_test.dart` (15) — no fakes: it spawns `server/src/index.js` on
   port 0 with a throwaway data directory, seeds both accounts through
   `src/seed.js`, then drives the real `ApiClient` the app uses — health, request
@@ -326,7 +362,7 @@ The tag supplies the version: `v1.2.3` becomes `versionName 1.2.3` in the APK an
   same report to `https://<owner>.github.io/<repo>/`, so reviewers get a link
   rather than a download. The release notes carry that URL.
 * **A floor that fails the build** — the last step of `checks` compares the total
-  against `COVERAGE_FLOOR` (`99.0` in the workflow `env`) and exits non-zero under
+  against `COVERAGE_FLOOR` (`100.0` in the workflow `env`) and exits non-zero under
   it, with `::error::` naming the number. Because both build jobs need `checks`,
   a tag that trips it publishes no APK and no installer. It reads the percentage
   the summary step wrote to `coverage/pct.txt` rather than recomputing it, so the
@@ -336,8 +372,8 @@ The tag supplies the version: `v1.2.3` becomes `versionName 1.2.3` in the APK an
   HTML artifacts are already uploaded, so a red run still tells you which lines
   went missing instead of failing before there is anything to look at. The floor
   is a single total, not per-file, because a per-file rule would fail on files the
-  suite is not meant to load. Raise it — in a commit of its own, never in the
-  same change that loses coverage — as the remaining gap closes; lowering it to
+  suite is not meant to load. It sits at the top of the range, so the only way a
+  red run clears is to cover the missing lines or delete the code: lowering it to
   turn a build green is the one edit that makes the number worthless.
 
 Pages needs one switch, once: **Settings → Pages → Build and deployment →
@@ -358,15 +394,17 @@ runner and on every dev machine, for a report whose job is only to answer
 
 One caveat before quoting the number: `flutter test --coverage` only records
 files a test actually loads, so the total covers the small number of `lib/`
-files the suite reaches (currently 4 of 30: models, REST client, crypto service,
-connection manager) — and both the summary and the HTML say so, rather than
-showing screens as 0%. Of those four, `models.dart` (323/323),
-`connection_manager.dart` (103/103) and `rest_client.dart` (99/99) are at 100%,
-`crypto_service.dart` is at 95% — its five uncovered lines are two helpers
-nothing calls any more (an `identityPublicKey` getter and
-`hasNetworkInterface`), not untested behaviour — and the report as a whole is at
-99.2%; the number only means anything because the rest of `lib/` — screens and
-platform services — is not instrumented at all. `tools/` is outside `lib/` for
+files the suite reaches (currently 6 of 31: models, REST client, crypto service,
+connection manager, auto-responder, local store) — and both the summary and the
+HTML say so, rather than showing screens as 0%. All six are at 100% —
+`models.dart` (323/323), `connection_manager.dart` (103/103), `rest_client.dart`
+(99/99), `crypto_service.dart` (95/95), `auto_responder.dart` (30/30) and
+`local_store.dart` (73/73) — so the report as a whole reads 100% (723/723) and
+the workflow floor is 100 to match. Two unused helpers in `crypto_service.dart`
+(an `identityPublicKey` getter and `hasNetworkInterface`) were deleted to get
+there; covering them with tests would have been worse. The number still only
+means anything because the rest of `lib/` — screens and platform services — is
+not instrumented at all. `tools/` is outside `lib/` for
 the same reason it is outside the app bundle, so the generator's own 22 tests
 are not in the report even though they run in the same job.
 

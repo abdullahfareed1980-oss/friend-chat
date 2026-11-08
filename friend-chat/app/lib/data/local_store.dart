@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../models/models.dart';
+import 'meta_store.dart';
 
 /// ---------------------------------------------------------------------------
 /// Offline-first local store.
@@ -19,7 +20,7 @@ import '../models/models.dart';
 /// which is the whole point of the cache.
 /// ---------------------------------------------------------------------------
 
-class LocalStore {
+class LocalStore implements MetaStore {
   LocalStore._();
 
   static const _messagesBox = 'fc_messages_v1';
@@ -34,8 +35,17 @@ class LocalStore {
 
   bool get isOpen => _messages.isOpen;
 
-  Future<void> open(Uint8List encryptionKey) async {
-    await Hive.initFlutter();
+  /// Opens the three boxes.
+  ///
+  /// [path] is a seam for tests: Hive normally finds its directory through
+  /// `path_provider`, which needs a plugin channel a headless test does not have,
+  /// so tests pass a temporary directory and get the same encrypted boxes.
+  Future<void> open(Uint8List encryptionKey, {String? path}) async {
+    if (path == null) {
+      await Hive.initFlutter();
+    } else {
+      Hive.init(path);
+    }
     final cipher = HiveAesCipher(encryptionKey);
     _messages = await Hive.openBox<Map>(_messagesBox, encryptionCipher: cipher);
     _meta = await Hive.openBox<Map>(_metaBox, encryptionCipher: cipher);
@@ -108,6 +118,7 @@ class LocalStore {
   /* Generic meta (session, settings, endpoint cache)                     */
   /* ------------------------------------------------------------------ */
 
+  @override
   T? readMeta<T>(String key) {
     final raw = _meta.get(key);
     if (raw == null) return null;
@@ -115,6 +126,7 @@ class LocalStore {
     return value is T ? value : null;
   }
 
+  @override
   Map<String, dynamic>? readMetaMap(String key) {
     final raw = _meta.get(key);
     if (raw == null) return null;
@@ -122,6 +134,7 @@ class LocalStore {
     return value is Map ? Map<String, dynamic>.from(value) : null;
   }
 
+  @override
   Future<void> writeMeta(String key, Object? value) => _meta.put(key, {'value': value});
 
   Future<void> removeMeta(String key) => _meta.delete(key);

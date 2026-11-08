@@ -21,7 +21,7 @@ encrypted so even that server cannot read them.
 | Part | State |
 | --- | --- |
 | `server/` — Node 22+ / Socket.io / SQLite | complete, **14 end-to-end tests passing** |
-| `app/` — Flutter (Android, Windows, iOS source-compatible) | complete, **`flutter analyze` clean, 165 tests passing** |
+| `app/` — Flutter (Android, Windows, iOS source-compatible) | complete, **`flutter analyze` clean, 194 tests passing** |
 | Onboarding (welcome → server → phone → OTP) | implemented |
 | Chat, ticks, offline cache, background service, business tools | implemented |
 | Docs (architecture, API, deployment, security, build) | included |
@@ -30,8 +30,8 @@ What is *not* here: a signed APK or a compiled `.exe`. Pushing a `v*` tag makes
 GitHub Actions build and attach both, with the test-coverage summary in the
 release notes, a browsable per-line HTML report alongside, and the same report
 deployed to GitHub Pages ([`.github/workflows/build.yml`](../.github/workflows/build.yml)).
-That tag builds nothing at all unless analyze passes, the tests pass, and
-instrumented coverage stays at or above 99%. Locally they are one command away —
+That tag builds nothing at all unless the workflow files lint, analyze passes, the
+tests pass, and instrumented coverage stays at 100%. Locally they are one command away —
 see [docs/BUILD.md](docs/BUILD.md) — but they must be built on a machine with the
 Android SDK / Windows toolchain, which a headless container does not have. No part
 of the app was run on a device yet; the analyse pass proves it compiles, not that
@@ -249,16 +249,17 @@ $ cd server && npm test
                       media round-trip, business docs, presence, tombstones)
 
 $ cd app && flutter analyze
-No issues found!     (30 Dart files + 6 test files)
+No issues found!     (31 Dart files + 8 test files)
 
 $ cd app && flutter test
-All tests passed!    (165 tests: 70 for wire parsing, round trips, display
-                      helpers and bad-input fallbacks — 58 unit (E2EE envelope,
+All tests passed!    (194 tests: 70 for wire parsing, round trips, display
+                      helpers and bad-input fallbacks — 87 unit (E2EE envelope,
                       attachments, safety number, endpoint racing incl. the
                       network-change and watchdog paths, REST headers, error
-                      and timeout mapping, cache) — 15 against a live server
-                      (real Node process, seeded accounts, real ApiClient) —
-                      and 22 for the coverage report generator)
+                      and timeout mapping, auto-reply rules, the encrypted
+                      local store, cache) — 15 against a live server (real Node
+                      process, seeded accounts, real ApiClient) — and 22 for the
+                      coverage report generator)
 ```
 
 Not verified: no APK was built, no Windows binary was produced, and the app was

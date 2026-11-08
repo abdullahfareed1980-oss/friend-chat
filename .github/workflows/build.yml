@@ -20,9 +20,10 @@ permissions:
 env:
   FLUTTER_VERSION: "3.47.9"
   # Release gate: instrumented coverage below this fails `checks`, and both
-  # build jobs need `checks`, so a tag publishes nothing. Raise it when a file
-  # reaches 100% rather than leaving the slack there forever.
-  COVERAGE_FLOOR: "99.0"
+  # build jobs need `checks`, so a tag publishes nothing. Every file the suite
+  # loads is at 100%, so the floor is 100 as well — a single uncovered line fails
+  # a build. Files no test loads stay outside the denominator; see docs/BUILD.md.
+  COVERAGE_FLOOR: "100.0"
 
 jobs:
   # Both builds need this, so a tag whose code does not analyse, whose tests
@@ -35,6 +36,26 @@ jobs:
         working-directory: friend-chat/app
     steps:
       - uses: actions/checkout@v4
+
+      # Workflow files are code: actionlint checks them against the schema and
+      # hands every `run:` block to shellcheck. Cheap and seconds-fast, so it runs
+      # first — before Flutter is set up — and a broken workflow fails the job that
+      # both builds need. Pinned by version, never `main`.
+      - name: Lint workflow files
+        working-directory: .
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          set -euo pipefail
+          # Without shellcheck, actionlint silently skips every `run:` block — the
+          # check would still pass while linting almost nothing.
+          command -v shellcheck > /dev/null || { echo "::error::shellcheck is missing, so actionlint would not lint the run: blocks"; exit 1; }
+          tmp="${RUNNER_TEMP:-/tmp}"
+          curl -sSfL -o "$tmp/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf "$tmp/actionlint.tar.gz" -C "$tmp" actionlint
+          "$tmp/actionlint" -version
+          "$tmp/actionlint" .github/workflows/*.yml
 
       - uses: subosito/flutter-action@v2
         with:
@@ -134,10 +155,10 @@ jobs:
           if-no-files-found: error
 
       # Last on purpose: the summary and both artifacts are published before this
-      # can fail, so a red run still tells you which lines were lost. The gate is
-      # on the total, not on 100%, because `crypto_service.dart` still carries two
-      # unused helpers — see docs/BUILD.md for what the number does and does not
-      # mean before making it stricter.
+      # can fail, so a red run still tells you which lines were lost. The floor is
+      # the instrumented total, and 100% here does not mean the screens are covered
+      # — no test loads them, so they are not in the denominator at all. See
+      # docs/BUILD.md for what the number does and does not mean.
       - name: Coverage floor
         shell: bash
         run: |
@@ -386,8 +407,12 @@ jobs:
             cat notes.clean.md
             printf '\n<!-- coverage:start -->\n\n'
             cat coverage/summary.md
-            printf '\nPer-line HTML: <%s> (refreshed on every tag), also packaged as `friend-chat-coverage-%s.zip` here.\n' "$PAGES" "${GITHUB_REF_NAME#v}"
-            printf '_The raw `lcov.info` and the unpacked report stay on the workflow run._\n\n<!-- coverage:end -->\n'
+            # $'…' rather than '…' for these two: the backticks are literal markdown,
+            # but shellcheck reads backticks inside plain single quotes as command
+            # substitution and fails the run with SC2016. ANSI-C quoting keeps them
+            # literal (`\n` still becomes a newline) and lints clean.
+            printf $'\nPer-line HTML: <%s> (refreshed on every tag), also packaged as `friend-chat-coverage-%s.zip` here.\n' "$PAGES" "${GITHUB_REF_NAME#v}"
+            printf $'_The raw `lcov.info` and the unpacked report stay on the workflow run._\n\n<!-- coverage:end -->\n'
           } > notes.new.md
 
           gh release edit "$GITHUB_REF_NAME" --notes-file notes.new.md

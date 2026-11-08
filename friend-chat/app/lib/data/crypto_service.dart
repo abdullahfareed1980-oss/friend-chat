@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
@@ -60,8 +59,6 @@ class CryptoService {
 
   SimpleKeyPair? _identity;
   SimplePublicKey? _identityPublic;
-
-  SimplePublicKey? get identityPublicKey => _identityPublic;
 
   /// Base64 X25519 public key, published to the server.
   String? get identityPublicKeyBase64 =>
@@ -223,15 +220,5 @@ class CryptoService {
       if (a[i] != b[i]) return false;
     }
     return true;
-  }
-}
-
-/// Small helper so callers do not have to think about dart:io on web.
-Future<bool> hasNetworkInterface() async {
-  try {
-    final interfaces = await NetworkInterface.list(includeLoopback: false);
-    return interfaces.isNotEmpty;
-  } on SocketException {
-    return false;
   }
 }
