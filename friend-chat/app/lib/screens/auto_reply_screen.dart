@@ -265,7 +265,7 @@ class _HourPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<int>(
-      initialValue: value,
+      value: value,
       decoration: InputDecoration(labelText: label),
       dropdownColor: FcColors.surfaceHigh,
       items: List.generate(

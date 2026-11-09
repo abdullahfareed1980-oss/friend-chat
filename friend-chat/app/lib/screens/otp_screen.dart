@@ -214,14 +214,14 @@ class _OtpScreenState extends State<OtpScreen> {
                           borderRadius: BorderRadius.circular(FcRadius.md),
                           border: Border.all(
                             color: filled
-                                ? FcColors.indigo.withValues(alpha: 0.7)
+                                ? FcColors.indigo.withOpacity(0.7)
                                 : active
-                                    ? FcColors.mint.withValues(alpha: 0.6)
+                                    ? FcColors.mint.withOpacity(0.6)
                                     : FcColors.divider,
                             width: active ? 1.6 : 1,
                           ),
                           boxShadow: active
-                              ? [BoxShadow(color: FcColors.mint.withValues(alpha: 0.15), blurRadius: 14)]
+                              ? [BoxShadow(color: FcColors.mint.withOpacity(0.15), blurRadius: 14)]
                               : null,
                         ),
                         child: Text(
@@ -240,9 +240,9 @@ class _OtpScreenState extends State<OtpScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: FcColors.warning.withValues(alpha: 0.10),
+                  color: FcColors.warning.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(FcRadius.sm),
-                  border: Border.all(color: FcColors.warning.withValues(alpha: 0.35)),
+                  border: Border.all(color: FcColors.warning.withOpacity(0.35)),
                 ),
                 child: Text(
                   'Dev mode: your server returned ${_challenge.devCode}. Turn OTP_DEBUG off in production.',

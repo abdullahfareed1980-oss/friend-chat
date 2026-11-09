@@ -37,7 +37,7 @@ class FriendChatLogo extends StatelessWidget {
                 boxShadow: glow
                     ? [
                         BoxShadow(
-                          color: FcColors.indigo.withValues(alpha: 0.35),
+                          color: FcColors.indigo.withOpacity(0.35),
                           blurRadius: size * 0.35,
                           spreadRadius: size * 0.02,
                         ),
@@ -79,7 +79,7 @@ class _LogoPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.4
-          ..color = Colors.white.withValues(alpha: 0.12),
+          ..color = Colors.white.withOpacity(0.12),
       );
     }
 
@@ -99,7 +99,7 @@ class _LogoPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.4
-        ..color = FcColors.mint.withValues(alpha: 0.5),
+        ..color = FcColors.mint.withOpacity(0.5),
     );
     canvas.drawPath(
       shield,
@@ -108,7 +108,7 @@ class _LogoPainter extends CustomPainter {
           center: const Alignment(0, -0.4),
           radius: 0.9,
           colors: [
-            FcColors.mint.withValues(alpha: 0.16),
+            FcColors.mint.withOpacity(0.16),
             Colors.transparent,
           ],
         ).createShader(const Rect.fromLTWH(14, 10, 72, 82)),
@@ -119,20 +119,20 @@ class _LogoPainter extends CustomPainter {
       const Rect.fromLTWH(24, 30, 42, 30),
       const Radius.circular(11),
     );
-    canvas.drawRRect(back, Paint()..color = Colors.white.withValues(alpha: 0.93));
+    canvas.drawRRect(back, Paint()..color = Colors.white.withOpacity(0.93));
     final backTail = Path()
       ..moveTo(31, 58)
       ..lineTo(28, 68)
       ..lineTo(40, 59)
       ..close();
-    canvas.drawPath(backTail, Paint()..color = Colors.white.withValues(alpha: 0.93));
+    canvas.drawPath(backTail, Paint()..color = Colors.white.withOpacity(0.93));
 
     // dots inside the back bubble
     for (var i = 0; i < 3; i++) {
       canvas.drawCircle(
         Offset(38 + i * 8.0, 45),
         2.1,
-        Paint()..color = FcColors.indigoDeep.withValues(alpha: 0.75),
+        Paint()..color = FcColors.indigoDeep.withOpacity(0.75),
       );
     }
 
@@ -167,7 +167,7 @@ class _LogoPainter extends CustomPainter {
       const Offset(52, 58),
       const Offset(70, 58),
       Paint()
-        ..color = FcColors.midnight.withValues(alpha: 0.55)
+        ..color = FcColors.midnight.withOpacity(0.55)
         ..strokeWidth = 2
         ..strokeCap = StrokeCap.round,
     );
@@ -175,7 +175,7 @@ class _LogoPainter extends CustomPainter {
     // --- secure node network ------------------------------------------------
     const nodes = [Offset(72, 18), Offset(86, 26), Offset(76, 36)];
     final linkPaint = Paint()
-      ..color = FcColors.mintSoft.withValues(alpha: 0.55)
+      ..color = FcColors.mintSoft.withOpacity(0.55)
       ..strokeWidth = 1.2;
     canvas.drawLine(nodes[0], nodes[1], linkPaint);
     canvas.drawLine(nodes[1], nodes[2], linkPaint);
@@ -188,7 +188,7 @@ class _LogoPainter extends CustomPainter {
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 0.9
-          ..color = FcColors.mint.withValues(alpha: 0.4),
+          ..color = FcColors.mint.withOpacity(0.4),
       );
     }
 
@@ -262,7 +262,7 @@ class AuroraBackdrop extends StatelessWidget {
           right: -80,
           child: _Blob(
             size: 300,
-            colors: [FcColors.indigo.withValues(alpha: 0.35), Colors.transparent],
+            colors: [FcColors.indigo.withOpacity(0.35), Colors.transparent],
           ),
         ),
         Positioned(
@@ -270,7 +270,7 @@ class AuroraBackdrop extends StatelessWidget {
           left: -100,
           child: _Blob(
             size: 320,
-            colors: [FcColors.mint.withValues(alpha: 0.16), Colors.transparent],
+            colors: [FcColors.mint.withOpacity(0.16), Colors.transparent],
           ),
         ),
         if (child != null) Positioned.fill(child: child!),
@@ -328,7 +328,7 @@ class _NodeFieldPainter extends CustomPainter {
     );
 
     final line = Paint()
-      ..color = FcColors.violetSoft.withValues(alpha: 0.10)
+      ..color = FcColors.violetSoft.withOpacity(0.10)
       ..strokeWidth = 0.8;
     for (var i = 0; i < points.length; i++) {
       for (var j = i + 1; j < points.length; j++) {
@@ -338,7 +338,7 @@ class _NodeFieldPainter extends CustomPainter {
       }
     }
     for (final point in points) {
-      canvas.drawCircle(point, 1.6, Paint()..color = FcColors.mint.withValues(alpha: 0.35));
+      canvas.drawCircle(point, 1.6, Paint()..color = FcColors.mint.withOpacity(0.35));
     }
   }
 

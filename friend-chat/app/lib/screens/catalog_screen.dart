@@ -51,9 +51,9 @@ class CatalogScreen extends StatelessWidget {
                           width: 46,
                           height: 46,
                           decoration: BoxDecoration(
-                            color: FcColors.mint.withValues(alpha: 0.10),
+                            color: FcColors.mint.withOpacity(0.10),
                             borderRadius: BorderRadius.circular(13),
-                            border: Border.all(color: FcColors.mint.withValues(alpha: 0.22)),
+                            border: Border.all(color: FcColors.mint.withOpacity(0.22)),
                           ),
                           child: const Icon(Icons.local_mall_outlined, size: 20, color: FcColors.mint),
                         ),

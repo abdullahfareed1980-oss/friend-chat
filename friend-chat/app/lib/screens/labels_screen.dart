@@ -46,7 +46,7 @@ class LabelsScreen extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: FcCard(
                         borderColor: business.conversationLabels.contains(label.id)
-                            ? Color(parseHexColor(label.colorHex)).withValues(alpha: 0.6)
+                            ? Color(parseHexColor(label.colorHex)).withOpacity(0.6)
                             : null,
                         onTap: () => business.toggleLabel(label.id),
                         child: Row(

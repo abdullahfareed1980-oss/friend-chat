@@ -48,7 +48,7 @@ class MessageBubble extends StatelessWidget {
                 boxShadow: outgoing
                     ? [
                         BoxShadow(
-                          color: FcColors.indigo.withValues(alpha: 0.22),
+                          color: FcColors.indigo.withOpacity(0.22),
                           blurRadius: 16,
                           offset: const Offset(0, 5),
                         ),
@@ -67,7 +67,7 @@ class MessageBubble extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 14,
                           fontStyle: FontStyle.italic,
-                          color: Colors.white.withValues(alpha: 0.65),
+                          color: Colors.white.withOpacity(0.65),
                         ),
                       )
                     else ...[
@@ -98,7 +98,7 @@ class MessageBubble extends StatelessWidget {
                                 ? Icons.storefront_rounded
                                 : Icons.attach_file_rounded,
                             size: 11,
-                            color: Colors.white.withValues(alpha: 0.55),
+                            color: Colors.white.withOpacity(0.55),
                           ),
                           const SizedBox(width: 4),
                         ],
@@ -106,7 +106,7 @@ class MessageBubble extends StatelessWidget {
                           formatClock(message.createdAt),
                           style: TextStyle(
                             fontSize: 10.5,
-                            color: outgoing ? Colors.white.withValues(alpha: 0.7) : FcColors.textFaint,
+                            color: outgoing ? Colors.white.withOpacity(0.7) : FcColors.textFaint,
                           ),
                         ),
                         if (outgoing) ...[
@@ -145,8 +145,8 @@ class StatusTicks extends StatelessWidget {
           ),
         ),
       MessageStatus.failed => Icon(Icons.error_outline_rounded, size: size, color: FcColors.danger),
-      MessageStatus.sent => _Ticks(count: 1, size: size, color: Colors.white.withValues(alpha: 0.75)),
-      MessageStatus.delivered => _Ticks(count: 2, size: size, color: Colors.white.withValues(alpha: 0.85)),
+      MessageStatus.sent => _Ticks(count: 1, size: size, color: Colors.white.withOpacity(0.75)),
+      MessageStatus.delivered => _Ticks(count: 2, size: size, color: Colors.white.withOpacity(0.85)),
       MessageStatus.read => _Ticks(count: 2, size: size, color: FcColors.mintSoft),
     };
   }
@@ -222,9 +222,9 @@ class _AttachmentTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: outgoing ? 0.18 : 0.25),
+        color: Colors.black.withOpacity(outgoing ? 0.18 : 0.25),
         borderRadius: BorderRadius.circular(FcRadius.sm),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        border: Border.all(color: Colors.white.withOpacity(0.10)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -233,7 +233,7 @@ class _AttachmentTile extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: FcColors.mint.withValues(alpha: 0.15),
+              color: FcColors.mint.withOpacity(0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 20, color: FcColors.mintSoft),
@@ -253,7 +253,7 @@ class _AttachmentTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   '${formatBytes(media.sizeBytes)} · encrypted',
-                  style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.6)),
+                  style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.6)),
                 ),
               ],
             ),
@@ -276,9 +276,9 @@ class _CatalogCard extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 210),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: outgoing ? 0.20 : 0.25),
+        color: Colors.black.withOpacity(outgoing ? 0.20 : 0.25),
         borderRadius: BorderRadius.circular(FcRadius.sm),
-        border: Border.all(color: FcColors.mint.withValues(alpha: 0.35)),
+        border: Border.all(color: FcColors.mint.withOpacity(0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,7 +294,7 @@ class _CatalogCard extends StatelessWidget {
                   fontSize: 9.5,
                   letterSpacing: 0.8,
                   fontWeight: FontWeight.w700,
-                  color: FcColors.mintSoft.withValues(alpha: 0.9),
+                  color: FcColors.mintSoft.withOpacity(0.9),
                 ),
               ),
             ],
@@ -310,7 +310,7 @@ class _CatalogCard extends StatelessWidget {
               snapshot.description!,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, height: 1.3, color: Colors.white.withValues(alpha: 0.72)),
+              style: TextStyle(fontSize: 12, height: 1.3, color: Colors.white.withOpacity(0.72)),
             ),
           ],
           const SizedBox(height: 8),
@@ -411,7 +411,7 @@ class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProv
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color: FcColors.mint.withValues(alpha: 0.85),
+                            color: FcColors.mint.withOpacity(0.85),
                             shape: BoxShape.circle,
                           ),
                         ),

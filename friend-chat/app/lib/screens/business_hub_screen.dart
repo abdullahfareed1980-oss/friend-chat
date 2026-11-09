@@ -36,7 +36,7 @@ class BusinessHubScreen extends StatelessWidget {
           padding: const EdgeInsets.only(top: 8, bottom: FcSpace.xl),
           children: [
             FcCard(
-              borderColor: FcColors.mint.withValues(alpha: 0.3),
+              borderColor: FcColors.mint.withOpacity(0.3),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -153,7 +153,7 @@ class _ToolCard extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: FcColors.indigo.withValues(alpha: 0.14),
+                color: FcColors.indigo.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(13),
               ),
               child: Icon(icon, size: 19, color: FcColors.violetSoft),

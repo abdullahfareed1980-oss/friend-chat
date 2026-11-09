@@ -290,7 +290,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: chat.peerTyping
                           ? FcColors.mint
                           : chat.peerOnline
-                              ? FcColors.mint.withValues(alpha: 0.8)
+                              ? FcColors.mint.withOpacity(0.8)
                               : FcColors.textFaint,
                     ),
                   ),
@@ -440,7 +440,7 @@ class _Composer extends StatelessWidget {
                     gradient: FcColors.primaryGradient,
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
-                      BoxShadow(color: FcColors.indigo.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6)),
+                      BoxShadow(color: FcColors.indigo.withOpacity(0.35), blurRadius: 16, offset: const Offset(0, 6)),
                     ],
                   ),
                   child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 21),

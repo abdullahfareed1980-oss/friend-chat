@@ -78,9 +78,9 @@ class ChatListScreen extends StatelessWidget {
                 margin: const EdgeInsets.symmetric(horizontal: FcSpace.md),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: FcColors.warning.withValues(alpha: 0.08),
+                  color: FcColors.warning.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(FcRadius.md),
-                  border: Border.all(color: FcColors.warning.withValues(alpha: 0.3)),
+                  border: Border.all(color: FcColors.warning.withOpacity(0.3)),
                 ),
                 child: Text(
                   chat.lastSyncError!,
@@ -254,14 +254,14 @@ class _BusinessBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return FcCard(
       onTap: onTap,
-      borderColor: FcColors.mint.withValues(alpha: 0.35),
+      borderColor: FcColors.mint.withOpacity(0.35),
       child: Row(
         children: [
           Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: FcColors.mint.withValues(alpha: 0.12),
+              color: FcColors.mint.withOpacity(0.12),
               borderRadius: BorderRadius.circular(13),
             ),
             child: const Icon(Icons.storefront_rounded, size: 20, color: FcColors.mint),
@@ -298,7 +298,7 @@ class _PrivacyFooter extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: FcColors.surface.withValues(alpha: 0.55),
+        color: FcColors.surface.withOpacity(0.55),
         borderRadius: BorderRadius.circular(FcRadius.md),
         border: Border.all(color: FcColors.divider),
       ),

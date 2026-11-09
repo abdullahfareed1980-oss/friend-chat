@@ -96,11 +96,11 @@ class FcAvatar extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [accent.withValues(alpha: 0.95), FcColors.violet.withValues(alpha: 0.85)],
+                colors: [accent.withOpacity(0.95), FcColors.violet.withOpacity(0.85)],
               ),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              border: Border.all(color: Colors.white.withOpacity(0.10)),
               boxShadow: [
-                BoxShadow(color: accent.withValues(alpha: 0.25), blurRadius: size * 0.35, offset: const Offset(0, 4)),
+                BoxShadow(color: accent.withOpacity(0.25), blurRadius: size * 0.35, offset: const Offset(0, 4)),
               ],
             ),
             alignment: Alignment.center,
@@ -174,9 +174,9 @@ class ConnectionPill extends StatelessWidget {
         return Container(
           padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 12, vertical: compact ? 6 : 8),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.10),
+            color: color.withOpacity(0.10),
             borderRadius: BorderRadius.circular(FcRadius.pill),
-            border: Border.all(color: color.withValues(alpha: 0.35)),
+            border: Border.all(color: color.withOpacity(0.35)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -250,7 +250,7 @@ class FcCard extends StatelessWidget {
         border: Border.all(color: borderColor ?? FcColors.divider),
         boxShadow: glow == null
             ? null
-            : [BoxShadow(color: glow!.withValues(alpha: 0.18), blurRadius: 24, offset: const Offset(0, 8))],
+            : [BoxShadow(color: glow!.withOpacity(0.18), blurRadius: 24, offset: const Offset(0, 8))],
       ),
       child: child,
     );
@@ -282,9 +282,9 @@ class LabelChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: selected ? 0.28 : 0.12),
+          color: color.withOpacity(selected ? 0.28 : 0.12),
           borderRadius: BorderRadius.circular(FcRadius.pill),
-          border: Border.all(color: color.withValues(alpha: selected ? 0.9 : 0.4)),
+          border: Border.all(color: color.withOpacity(selected ? 0.9 : 0.4)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -330,7 +330,7 @@ class GradientButton extends StatelessWidget {
           gradient: FcColors.primaryGradient,
           boxShadow: [
             BoxShadow(
-              color: FcColors.indigo.withValues(alpha: enabled ? 0.35 : 0.1),
+              color: FcColors.indigo.withOpacity(enabled ? 0.35 : 0.1),
               blurRadius: 22,
               offset: const Offset(0, 8),
             ),
@@ -432,9 +432,9 @@ class FcBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
+        color: color.withOpacity(0.14),
         borderRadius: BorderRadius.circular(FcRadius.pill),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(color: color.withOpacity(0.35)),
       ),
       child: Text(
         text,

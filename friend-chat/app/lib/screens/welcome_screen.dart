@@ -107,9 +107,9 @@ class _Feature extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: FcColors.mint.withValues(alpha: 0.10),
+              color: FcColors.mint.withOpacity(0.10),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: FcColors.mint.withValues(alpha: 0.25)),
+              border: Border.all(color: FcColors.mint.withOpacity(0.25)),
             ),
             child: Icon(icon, size: 18, color: FcColors.mintSoft),
           ),
@@ -139,7 +139,7 @@ Future<void> showOtpDeliveryHint(BuildContext context) {
       content: const Text(
         'Friend Chat has no SMS provider — that would mean a third party. '
         'Your 6-digit code is printed in the terminal running Friend Chat Server:\n\n'
-        '  npm start                (on a Pi or laptop)\n'
+        '  npm start                    (on a Pi or laptop)\n'
         '  docker compose logs -f server   (in Docker)\n\n'
         'It expires in 10 minutes and works once.',
         style: TextStyle(height: 1.45, fontSize: 13.5, color: FcColors.textMuted),

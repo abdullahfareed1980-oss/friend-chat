@@ -243,7 +243,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
                 foregroundColor: FcColors.danger,
-                side: BorderSide(color: FcColors.danger.withValues(alpha: 0.4)),
+                side: BorderSide(color: FcColors.danger.withOpacity(0.4)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(FcRadius.md)),
               ),
               icon: const Icon(Icons.logout_rounded, size: 18),

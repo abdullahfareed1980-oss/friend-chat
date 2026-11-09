@@ -139,7 +139,7 @@ ThemeData buildFriendChatTheme() {
       iconTheme: IconThemeData(color: FcColors.text),
     ),
     dividerTheme: const DividerThemeData(color: FcColors.divider, thickness: 1, space: 1),
-    cardTheme: CardThemeData(
+    cardTheme: CardTheme(
       color: FcColors.surface,
       elevation: 0,
       margin: EdgeInsets.zero,
@@ -191,7 +191,7 @@ ThemeData buildFriendChatTheme() {
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(FcRadius.md)),
     ),
-    dialogTheme: DialogThemeData(
+    dialogTheme: DialogTheme(
       backgroundColor: FcColors.surface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(FcRadius.lg)),
