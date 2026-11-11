@@ -12,7 +12,11 @@ import path from 'node:path';
 import {
   audit,
   conversationIdsFor,
+  directConversationBetween,
+  getAllContacts,
+  getOrCreateDirectConversation,
   isMember,
+  listConversationsForUser,
   nowIso,
   peerOf,
   primaryConversation,
@@ -20,8 +24,9 @@ import {
   serializeMessage,
   serializeUser,
 } from './db.js';
-import { loginThrottle, makeRequireAuth, signToken, verifyPassword } from './auth.js';
+import { hashPassword, loginThrottle, makeRequireAuth, passwordIsWeak, signToken, verifyPassword } from './auth.js';
 import { maskPhone, normalizePhone, PhoneError } from './phone.js';
+import { createMailer } from './mailer.js';
 
 const BUSINESS_SECTIONS = new Set(['quick_replies', 'auto_reply', 'catalog', 'labels']);
 const DEFAULT_BUSINESS = {
@@ -33,12 +38,17 @@ const DEFAULT_BUSINESS = {
 
 /** Opened up after sign-in: the token plus everything the app needs to boot. */
 function sessionPayload(db, user) {
-  const conversation = primaryConversation(db);
-  if (!conversation) return { user: serializeUser(user), conversation: null, peer: null };
+  const convs = listConversationsForUser(db, user.id);
+  const primary = convs.length > 0 ? convs[0].conversation : primaryConversation(db);
+  const peer = primary ? peerOf(db, primary.id, user.id) : null;
+  const contacts = getAllContacts(db, user.id);
+
   return {
     user: serializeUser(user),
-    conversation: { id: conversation.id, kind: conversation.kind, createdAt: conversation.created_at },
-    peer: serializeUser(peerOf(db, conversation.id, user.id)),
+    conversation: primary ? { id: primary.id, kind: primary.kind, createdAt: primary.created_at } : null,
+    peer: serializeUser(peer),
+    conversations: convs,
+    contacts,
   };
 }
 
@@ -95,6 +105,7 @@ function issueSession({ db, config }, user, device) {
 export function registerRoutes(app, ctx) {
   const { db, config, io } = ctx;
   const requireAuth = makeRequireAuth(db, config);
+  const mailer = createMailer(config);
 
   /* ---------------------------------------------------------------------- */
   /* Health - also used by the app to race LAN vs public endpoints           */
@@ -109,21 +120,23 @@ export function registerRoutes(app, ctx) {
       users: Number(users),
       maxUsers: config.maxUsers,
       registrationOpen: config.allowRegistration,
-      otpDelivery: config.otp.delivery,
+      otpDelivery: mailer.isConfigured ? 'smtp' : config.otp.delivery,
+      smtpConfigured: mailer.isConfigured,
       e2ee: true,
     });
   });
 
   /* ---------------------------------------------------------------------- */
-  /* WhatsApp-style onboarding: phone -> OTP                                 */
+  /* WhatsApp-style onboarding: phone + Gmail -> Email OTP -> 2-Step Password */
   /* ---------------------------------------------------------------------- */
 
   /**
-   * Step 1. The phone asks for a code. Because this server is yours, the code
-   * is delivered on a channel only you can read: the server's own terminal
-   * (or `docker compose logs -f server`). No SMS aggregator, no third party.
+   * Step 1: Request OTP.
+   * Auto-registration enabled (no manual seeding required).
+   * Sends 6-digit OTP code directly to Gmail using Nodemailer.
+   * STRICT ACCOUNT LOCKING: If phone already registered, email must match!
    */
-  app.post('/api/auth/request-otp', loginThrottle({ max: 20 }), express.json({ limit: '4kb' }), (req, res) => {
+  app.post('/api/auth/request-otp', loginThrottle({ max: 20 }), express.json({ limit: '8kb' }), async (req, res) => {
     let normalized;
     try {
       normalized = normalizePhone(req.body?.countryCode, req.body?.phone);
@@ -132,15 +145,58 @@ export function registerRoutes(app, ctx) {
       throw err;
     }
 
+    let email = String(req.body?.email ?? '').trim().toLowerCase();
     const existing = db.prepare('SELECT * FROM users WHERE phone = ?').get(normalized.phone);
+
+    // If phone not recognized and registration is restricted, reject immediately
     if (!existing) {
       const count = Number(db.prepare('SELECT COUNT(*) AS n FROM users').get().n);
       if (!config.allowRegistration || count >= config.maxUsers) {
         return res.status(403).json({
           error: 'phone_not_enrolled',
-          hint: 'This private server only accepts its two enrolled numbers. Ask the owner to add yours with `npm run seed -- --rotate`.',
+          message: 'Server registration is closed or phone is not enrolled.',
         });
       }
+    }
+
+    // If an existing registered user requests OTP and email is omitted, use bound email
+    if (!email && existing?.email) {
+      email = existing.email.toLowerCase();
+    }
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({
+        error: 'invalid_email',
+        message: 'A valid Gmail or email address is required for 2-Step Verification.',
+      });
+    }
+
+    // STRICT ACCOUNT LOCKING:
+    // If an already registered phone number is entered by anyone else, it must verify the exact paired Gmail.
+    // If incorrect or mismatched, reject it instantly with a 403 Forbidden error ("Account locked to another email").
+    if (existing && existing.email) {
+      if (existing.email.toLowerCase() !== email) {
+        audit(db, 'account_lock_violation', existing.id, {
+          phone: maskPhone(normalized.phone),
+          providedEmail: email,
+          actualEmail: existing.email,
+          ip: req.ip,
+        });
+        return res.status(403).json({
+          error: 'account_locked',
+          message: 'Account locked to another email',
+          hint: 'This phone number is permanently paired with a different email address.',
+        });
+      }
+    }
+
+    // Ensure email is not already bound to a different phone
+    const existingEmail = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(email);
+    if (existingEmail && existingEmail.phone && existingEmail.phone !== normalized.phone) {
+      return res.status(403).json({
+        error: 'email_already_bound',
+        message: 'This email is already locked to another phone number.',
+      });
     }
 
     const now = Date.now();
@@ -171,12 +227,13 @@ export function registerRoutes(app, ctx) {
     const expiresAt = new Date(now + config.otp.ttlSeconds * 1000).toISOString();
 
     db.prepare(
-      `INSERT INTO otp_challenges (id, phone, country_code, code_hash, attempts, created_at, expires_at, user_id, ip)
-         VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+      `INSERT INTO otp_challenges (id, phone, country_code, email, code_hash, attempts, created_at, expires_at, user_id, ip)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     ).run(
       id,
       normalized.phone,
       normalized.countryCode,
+      email,
       hashCode(config, id, code),
       createdAt,
       expiresAt,
@@ -184,35 +241,51 @@ export function registerRoutes(app, ctx) {
       req.ip ?? null,
     );
 
+    // Send code to user's Gmail via Nodemailer
+    await mailer.sendOtp({
+      toEmail: email,
+      code,
+      phone: `${normalized.countryCode} ${normalized.nationalNumber}`,
+      expiresInMinutes: Math.round(config.otp.ttlSeconds / 60),
+    });
+
     printOtpToServerConsole(config, {
       phone: normalized.phone,
       countryCode: normalized.countryCode,
       code,
       expiresInSeconds: config.otp.ttlSeconds,
     });
-    audit(db, 'otp_requested', existing?.id ?? null, { phone: maskPhone(normalized.phone), ip: req.ip });
+    audit(db, 'otp_requested', existing?.id ?? null, {
+      phone: maskPhone(normalized.phone),
+      email,
+      ip: req.ip,
+    });
 
     res.json({
       challengeId: id,
       phone: normalized.phone,
       countryCode: normalized.countryCode,
+      email,
       expiresInSeconds: config.otp.ttlSeconds,
       resendAfterSeconds: config.otp.resendSeconds,
-      delivery: config.otp.delivery,
+      delivery: mailer.isConfigured ? 'email' : config.otp.delivery,
       known: Boolean(existing),
+      hasPassword: Boolean(existing?.password_hash),
       // Development-only convenience, disabled unless OTP_DEBUG=true.
       ...(config.otp.debug ? { devCode: code } : {}),
     });
   });
 
   /**
-   * Step 2. Verify the code and receive a session. The same endpoint handles
-   * first-time enrollment when a slot is open, which is how the second phone
-   * joins after the owner runs `npm run seed`.
+   * Step 2: Verify OTP.
+   * If user is already registered with password, verifies password or flags requiresPassword.
+   * If new user, creates account with password or flags needsPassword.
    */
-  app.post('/api/auth/verify-otp', express.json({ limit: '4kb' }), (req, res) => {
+  app.post('/api/auth/verify-otp', express.json({ limit: '8kb' }), (req, res) => {
     const challengeId = String(req.body?.challengeId ?? '');
     const code = String(req.body?.code ?? '').replace(/\D/g, '');
+    const password = req.body?.password ? String(req.body.password) : null;
+    const displayName = String(req.body?.displayName ?? '').trim();
 
     const challenge = db.prepare('SELECT * FROM otp_challenges WHERE id = ?').get(challengeId);
     if (!challenge) return res.status(404).json({ error: 'challenge_not_found' });
@@ -235,47 +308,79 @@ export function registerRoutes(app, ctx) {
 
     let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(challenge.phone);
 
-    if (!user) {
-      // First-time enrollment. Only reachable when ALLOW_REGISTRATION=true and
-      // there is a free slot, which `request-otp` already checked.
-      const count = Number(db.prepare('SELECT COUNT(*) AS n FROM users').get().n);
-      if (!config.allowRegistration || count >= config.maxUsers) {
-        return res.status(403).json({ error: 'phone_not_enrolled' });
+    // Existing registered user
+    if (user) {
+      if (password && user.password_hash) {
+        if (!verifyPassword(password, user.password_hash)) {
+          audit(db, 'login_failed_2step', user.id, { ip: req.ip });
+          return res.status(401).json({
+            error: 'invalid_password',
+            message: 'Incorrect Two-Step Verification password.',
+          });
+        }
+      } else if (password && !user.password_hash) {
+        if (passwordIsWeak(password)) {
+          return res.status(400).json({
+            error: 'weak_password',
+            message: 'Password must be at least 6 characters.',
+          });
+        }
+        db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(
+          hashPassword(password),
+          user.id,
+        );
       }
+
+      // Permanently bind email if missing
+      if (!user.email && challenge.email) {
+        db.prepare('UPDATE users SET email = ?, email_verified_at = ? WHERE id = ?').run(
+          challenge.email,
+          nowIso(),
+          user.id,
+        );
+      }
+    } else {
+      // New user auto-registration
+      if (!password) {
+        return res.json({
+          verifiedOtp: true,
+          needsPassword: true,
+          challengeId: challenge.id,
+          phone: challenge.phone,
+          email: challenge.email,
+        });
+      }
+
+      if (passwordIsWeak(password)) {
+        return res.status(400).json({
+          error: 'weak_password',
+          message: 'Password must be at least 6 characters.',
+        });
+      }
+
       const id = randomUUID();
-      const displayName =
-        String(req.body?.displayName ?? '').trim() ||
-        `Friend ${challenge.phone.slice(-4)}`;
+      const name = displayName || `User ${challenge.phone.slice(-4)}`;
+      const at = nowIso();
+
       db.prepare(
-        `INSERT INTO users (id, username, display_name, password_hash, phone, country_code, phone_verified_at, is_business, accent_color, created_at)
-           VALUES (?, ?, ?, NULL, ?, ?, ?, 0, ?, ?)`,
+        `INSERT INTO users (id, username, display_name, password_hash, phone, country_code, phone_verified_at, email, email_verified_at, is_business, accent_color, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
       ).run(
         id,
-        `user_${challenge.phone.slice(-6)}`,
-        displayName,
+        `user_${challenge.phone.slice(-6)}_${randomInt(100, 999)}`,
+        name,
+        hashPassword(password),
         challenge.phone,
         challenge.country_code,
-        nowIso(),
-        '#4F46E5',
-        nowIso(),
+        at,
+        challenge.email,
+        at,
+        '#00A884',
+        at,
       );
 
-      let conversation = primaryConversation(db);
-      if (!conversation) {
-        const conversationId = randomUUID();
-        db.prepare('INSERT INTO conversations (id, kind, created_at) VALUES (?, ?, ?)').run(
-          conversationId,
-          'direct',
-          nowIso(),
-        );
-        conversation = { id: conversationId };
-      }
-      db.prepare(
-        'INSERT OR IGNORE INTO conversation_members (conversation_id, user_id) VALUES (?, ?)',
-      ).run(conversation.id, id);
-
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-      audit(db, 'account_enrolled', id, { phone: maskPhone(challenge.phone) });
+      audit(db, 'account_enrolled', id, { phone: maskPhone(challenge.phone), email: challenge.email });
     }
 
     const at = nowIso();
@@ -294,20 +399,121 @@ export function registerRoutes(app, ctx) {
     res.json(issueSession(ctx, user, req.body?.device));
   });
 
+  /**
+   * Step 2b: Set Account Password (Two-Step Verification setup).
+   * Prompts user to set password right after OTP verification.
+   * Permanently binds phone number to Gmail and password hash.
+   */
+  app.post('/api/auth/set-password', express.json({ limit: '8kb' }), (req, res) => {
+    const challengeId = String(req.body?.challengeId ?? '');
+    const password = String(req.body?.password ?? '');
+    const displayName = String(req.body?.displayName ?? '').trim();
+
+    if (passwordIsWeak(password)) {
+      return res.status(400).json({
+        error: 'weak_password',
+        message: 'Password must be at least 6 characters.',
+      });
+    }
+
+    const challenge = db.prepare('SELECT * FROM otp_challenges WHERE id = ?').get(challengeId);
+    if (!challenge) return res.status(404).json({ error: 'challenge_not_found' });
+    if (Date.parse(challenge.expires_at) < Date.now()) {
+      return res.status(410).json({ error: 'code_expired' });
+    }
+
+    let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(challenge.phone);
+    const at = nowIso();
+
+    if (!user) {
+      const id = randomUUID();
+      const name = displayName || `User ${challenge.phone.slice(-4)}`;
+      db.prepare(
+        `INSERT INTO users (id, username, display_name, password_hash, phone, country_code, phone_verified_at, email, email_verified_at, is_business, accent_color, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      ).run(
+        id,
+        `user_${challenge.phone.slice(-6)}_${randomInt(100, 999)}`,
+        name,
+        hashPassword(password),
+        challenge.phone,
+        challenge.country_code,
+        at,
+        challenge.email,
+        at,
+        '#00A884',
+        at,
+      );
+      user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      audit(db, 'account_enrolled', id, { phone: maskPhone(challenge.phone), email: challenge.email });
+    } else {
+      db.prepare(
+        `UPDATE users SET password_hash = ?, email = COALESCE(email, ?), email_verified_at = COALESCE(email_verified_at, ?)
+         WHERE id = ?`,
+      ).run(hashPassword(password), challenge.email, at, user.id);
+      if (displayName) {
+        db.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(displayName, user.id);
+      }
+      user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    }
+
+    db.prepare('UPDATE otp_challenges SET consumed_at = ?, user_id = ? WHERE id = ?').run(
+      at,
+      user.id,
+      challenge.id,
+    );
+    db.prepare('UPDATE users SET phone_verified_at = ?, last_seen_at = ? WHERE id = ?').run(
+      at,
+      at,
+      user.id,
+    );
+    audit(db, 'password_set_completed', user.id, { phone: maskPhone(challenge.phone) });
+
+    res.json(issueSession(ctx, user, req.body?.device));
+  });
+
   /* ---------------------------------------------------------------------- */
-  /* Fallback password login (server owner / desktop recovery)               */
+  /* Direct Login with Phone/Email and Password                              */
   /* ---------------------------------------------------------------------- */
   app.post(
     '/api/auth/login',
     loginThrottle(),
     express.json({ limit: '8kb' }),
     (req, res) => {
-      const username = String(req.body?.username ?? '').trim().toLowerCase();
+      const phoneInput = req.body?.phone;
+      const usernameInput = req.body?.username;
+      const emailInput = req.body?.email ? String(req.body.email).trim().toLowerCase() : null;
       const password = String(req.body?.password ?? '');
-      if (!username || !password) return res.status(400).json({ error: 'missing_credentials' });
 
-      const user = db.prepare('SELECT * FROM users WHERE lower(username) = ?').get(username);
-      if (!user || !verifyPassword(password, user.password_hash)) {
+      if (!password) return res.status(400).json({ error: 'missing_credentials' });
+
+      let user = null;
+      if (phoneInput) {
+        try {
+          const norm = normalizePhone(req.body?.countryCode ?? '', phoneInput);
+          user = db.prepare('SELECT * FROM users WHERE phone = ?').get(norm.phone);
+        } catch {
+          user = db.prepare('SELECT * FROM users WHERE phone = ?').get(String(phoneInput).replace(/\D/g, ''));
+        }
+
+        // STRICT ACCOUNT LOCKING CHECK
+        if (user && user.email && emailInput) {
+          if (user.email.toLowerCase() !== emailInput) {
+            audit(db, 'account_lock_violation_login', user.id, { ip: req.ip, providedEmail: emailInput });
+            return res.status(403).json({
+              error: 'account_locked',
+              message: 'Account locked to another email',
+              hint: 'This phone number is permanently paired with a different email address.',
+            });
+          }
+        }
+      } else if (emailInput) {
+        user = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(emailInput);
+      } else if (usernameInput) {
+        user = db.prepare('SELECT * FROM users WHERE lower(username) = ?').get(String(usernameInput).trim().toLowerCase());
+      }
+
+      if (!user || !user.password_hash || !verifyPassword(password, user.password_hash)) {
         audit(db, 'login_failed', user?.id ?? null, { ip: req.ip });
         return res.status(401).json({ error: 'invalid_credentials' });
       }
@@ -336,12 +542,63 @@ export function registerRoutes(app, ctx) {
     res.json({ ok: true });
   });
 
-  /** The other person's public profile, including their encryption key. */
+  /* ---------------------------------------------------------------------- */
+  /* Automated Contacts & Chat Discovery                                    */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * Discover registered users/contacts on the server, WhatsApp style.
+   */
+  app.get('/api/contacts', requireAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const contacts = getAllContacts(db, req.user.id);
+    res.json({ contacts });
+  });
+
+  /**
+   * List all conversations for the authenticated user with latest message snippet.
+   */
+  app.get('/api/conversations', requireAuth, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const conversations = listConversationsForUser(db, req.user.id);
+    res.json({ conversations });
+  });
+
+  /**
+   * Open or initiate a direct chat with a discovered contact.
+   */
+  app.post('/api/conversations', requireAuth, express.json({ limit: '4kb' }), (req, res) => {
+    const peerId = req.body?.peerId ? String(req.body.peerId).trim() : null;
+    const phone = req.body?.phone ? String(req.body.phone).replace(/\D/g, '') : null;
+
+    let peer = null;
+    if (peerId) {
+      peer = db.prepare('SELECT * FROM users WHERE id = ?').get(peerId);
+    } else if (phone) {
+      peer = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+    }
+
+    if (!peer || peer.id === req.user.id) {
+      return res.status(404).json({ error: 'peer_not_found', message: 'Target contact not found' });
+    }
+
+    const conversation = getOrCreateDirectConversation(db, req.user.id, peer.id);
+    res.status(200).json({
+      conversation: { id: conversation.id, kind: conversation.kind, createdAt: conversation.created_at },
+      peer: serializeUser(peer),
+    });
+  });
+
+  /** The public directory of contacts + primary peer for backward compatibility. */
   app.get('/api/directory', requireAuth, (req, res) => {
     const conversation = primaryConversation(db);
     const peer = conversation ? peerOf(db, conversation.id, req.user.id) : null;
+    const contacts = getAllContacts(db, req.user.id);
     res.set('Cache-Control', 'no-store');
-    res.json({ peer: serializeUser(peer) });
+    res.json({
+      peer: serializeUser(peer),
+      contacts,
+    });
   });
 
   /* ---------------------------------------------------------------------- */

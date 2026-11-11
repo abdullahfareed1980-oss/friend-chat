@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: friend-chat-server
+    runtime: node
+    plan: starter
+    rootDir: friend-chat/server
+    buildCommand: npm install
+    startCommand: node src/index.js
+    envVars:
+      - key: PORT
+        value: 8787
+      - key: HOST
+        value: 0.0.0.0
+      - key: NODE_ENV
+        value: production
+      - key: ALLOW_REGISTRATION
+        value: true
+      - key: MAX_USERS
+        value: 1000000
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_SECURE
+        value: true
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data/friend-chat
+    disk:
+      name: friend-chat-data
+      mountPath: /var/data/friend-chat
+      sizeGB: 10

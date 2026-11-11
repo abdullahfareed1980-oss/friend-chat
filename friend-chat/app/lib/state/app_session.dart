@@ -56,6 +56,9 @@ class AppSession extends ChangeNotifier {
   String deviceName = 'Friend Chat device';
   String devicePlatform = 'unknown';
 
+  List<ChatUser> contacts = const [];
+  List<ConversationSummary> conversations = const [];
+
   List<ServerEndpoint> _endpoints = const [];
   List<ServerEndpoint> get endpoints => _endpoints;
 
@@ -249,7 +252,46 @@ class AppSession extends ChangeNotifier {
     await _adoptSession(session);
     await _connectSocket();
     await refreshPeer();
+    await refreshContacts();
+    await refreshConversations();
     notifyListeners();
+  }
+
+  Future<void> refreshContacts() async {
+    final client = api;
+    if (client == null) return;
+    try {
+      contacts = await client.getContacts();
+      notifyListeners();
+    } catch (_) {
+      // Kept as-is if offline
+    }
+  }
+
+  Future<void> refreshConversations() async {
+    final client = api;
+    final me = user;
+    if (client == null || me == null) return;
+    try {
+      conversations = await client.getConversations(me.id);
+      notifyListeners();
+    } catch (_) {
+      // Kept as-is if offline
+    }
+  }
+
+  Future<String> openConversationWith(ChatUser targetUser) async {
+    final client = api;
+    if (client == null) throw StateError('Not signed in');
+    final res = await client.startConversation(peerId: targetUser.id);
+    final conv = res['conversation'] as Map<String, dynamic>;
+    final cid = conv['id'] as String;
+    conversationId = cid;
+    peer = targetUser.copyWith(conversationId: cid);
+    await store.writeMeta('conversationId', cid);
+    await refreshConversations();
+    notifyListeners();
+    return cid;
   }
 
   Future<void> refreshPeer() async {

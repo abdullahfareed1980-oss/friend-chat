@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { verifyToken } from './auth.js';
-import { nowIso, peerOf, serializeMessage, serializeUser } from './db.js';
+import { conversationIdsFor, nowIso, peerOf, serializeMessage, serializeUser } from './db.js';
 
 const KINDS = new Set(['text', 'media', 'catalog', 'system']);
 const userRoom = (id) => `user:${id}`;
@@ -70,6 +70,16 @@ export function attachRealtime(io, ctx) {
 
   const peerIdIn = (conversationId, userId) => peerOf(db, conversationId, userId)?.id ?? null;
 
+  const getPeerIdsForUser = (userId) => {
+    const convs = conversationIdsFor(db, userId);
+    const peerIds = new Set();
+    for (const cid of convs) {
+      const p = peerOf(db, cid, userId);
+      if (p) peerIds.add(p.id);
+    }
+    return [...peerIds];
+  };
+
   const isOnline = (userId) => (connections.get(userId)?.size ?? 0) > 0;
 
   io.on('connection', (socket) => {
@@ -80,6 +90,10 @@ export function attachRealtime(io, ctx) {
     connections.set(user.id, set);
 
     socket.join(userRoom(user.id));
+    const userConvs = conversationIdsFor(db, user.id);
+    for (const cid of userConvs) {
+      socket.join(`conv:${cid}`);
+    }
     if (conversation) socket.join(`conv:${conversation.id}`);
 
     const peer = conversation ? peerOf(db, conversation.id, user.id) : null;
@@ -87,11 +101,22 @@ export function attachRealtime(io, ctx) {
     log(config, `[socket] ${user.username} connected (${socket.id})`);
 
     if (set.size === 1) {
-      io.to(peer ? userRoom(peer.id) : 'nobody').emit('presence', {
-        userId: user.id,
-        online: true,
-        at: nowIso(),
-      });
+      const peers = getPeerIdsForUser(user.id);
+      if (peers.length > 0) {
+        for (const pid of peers) {
+          io.to(userRoom(pid)).emit('presence', {
+            userId: user.id,
+            online: true,
+            at: nowIso(),
+          });
+        }
+      } else if (peer) {
+        io.to(userRoom(peer.id)).emit('presence', {
+          userId: user.id,
+          online: true,
+          at: nowIso(),
+        });
+      }
     }
 
     const hello = {
@@ -152,6 +177,8 @@ export function attachRealtime(io, ctx) {
         const message = serializeMessage(row);
         const peerId = peerIdIn(conversationId, user.id);
 
+        socket.join(`conv:${conversationId}`);
+        io.to(`conv:${conversationId}`).emit('message:new', message);
         if (peerId) io.to(userRoom(peerId)).emit('message:new', message);
         // The sender's other devices (tablet, second phone) stay in sync,
         // but the sending socket already has it optimistically.
@@ -166,8 +193,9 @@ export function attachRealtime(io, ctx) {
     /* ---------------------------------------------------------------- */
     /* Delivery + read receipts                                          */
     /* ---------------------------------------------------------------- */
-    socket.on('receipt:delivered', ({ seqs } = {}, ack = () => {}) => {
+    socket.on('receipt:delivered', (payload = {}, ack = () => {}) => {
       try {
+        const seqs = Array.isArray(payload) ? payload : payload?.seqs;
         const list = Array.isArray(seqs) ? seqs.slice(0, 200) : [];
         const at = nowIso();
         let highest = 0;
@@ -178,7 +206,7 @@ export function attachRealtime(io, ctx) {
           if (info.changes > 0 && n > highest) highest = n;
         }
         if (highest > 0) {
-          const conv = conversation?.id;
+          const conv = payload?.conversationId ?? conversation?.id;
           const peerId = conv ? peerIdIn(conv, user.id) : null;
           if (peerId) {
             io.to(userRoom(peerId)).emit('receipt:update', {
@@ -224,12 +252,13 @@ export function attachRealtime(io, ctx) {
     /* ---------------------------------------------------------------- */
     /* Typing, presence, sync, delete                                     */
     /* ---------------------------------------------------------------- */
-    socket.on('typing', ({ isTyping = false } = {}) => {
-      if (!conversation) return;
-      const peerId = peerIdIn(conversation.id, user.id);
+    socket.on('typing', ({ conversationId, isTyping = false } = {}) => {
+      const convId = conversationId ?? conversation?.id;
+      if (!convId) return;
+      const peerId = peerIdIn(convId, user.id);
       if (!peerId) return;
       io.to(userRoom(peerId)).emit('typing', {
-        conversationId: conversation.id,
+        conversationId: convId,
         userId: user.id,
         isTyping: Boolean(isTyping),
         at: nowIso(),
@@ -242,22 +271,28 @@ export function attachRealtime(io, ctx) {
       ack({ ok: true, at });
     });
 
-    socket.on('sync:request', ({ sinceSeq = 0, limit = 300 } = {}, ack = () => {}) => {
+    socket.on('sync:request', ({ conversationId, sinceSeq = 0, limit = 300 } = {}, ack = () => {}) => {
       try {
         const since = Math.max(0, Number(sinceSeq) || 0);
         const take = Math.min(500, Math.max(1, Number(limit) || 300));
-        const convId = conversation?.id;
-        if (!convId) return ack({ ok: true, messages: [], latestSeq: since, hasMore: false });
+        const convIds = conversationId ? [conversationId] : conversationIdsFor(db, user.id);
+        if (convIds.length === 0) return ack({ ok: true, messages: [], latestSeq: since, hasMore: false });
 
+        const placeholders = convIds.map(() => '?').join(',');
         const rows = db
-          .prepare('SELECT * FROM messages WHERE conversation_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
-          .all(convId, since, take + 1);
+          .prepare(
+            `SELECT * FROM messages WHERE conversation_id IN (${placeholders}) AND seq > ? ORDER BY seq ASC LIMIT ?`,
+          )
+          .all(...convIds, since, take + 1);
         const hasMore = rows.length > take;
         const page = hasMore ? rows.slice(0, take) : rows;
+        const maxSeq = db
+          .prepare(`SELECT COALESCE(MAX(seq),0) AS s FROM messages WHERE conversation_id IN (${placeholders})`)
+          .get(...convIds).s;
         ack({
           ok: true,
           messages: page.map(serializeMessage),
-          latestSeq: Number(db.prepare('SELECT COALESCE(MAX(seq),0) AS s FROM messages WHERE conversation_id = ?').get(convId).s),
+          latestSeq: Number(maxSeq),
           hasMore,
           serverTime: nowIso(),
         });
@@ -266,13 +301,14 @@ export function attachRealtime(io, ctx) {
       }
     });
 
-    socket.on('message:delete', ({ uuid } = {}, ack = () => {}) => {
+    socket.on('message:delete', ({ uuid, conversationId } = {}, ack = () => {}) => {
       try {
         const at = nowIso();
+        const convId = conversationId ?? conversation?.id;
         const info = q.tombstone.run(at, String(uuid), user.id);
-        if (info.changes > 0 && conversation) {
-          const event = { uuid, conversationId: conversation.id, at };
-          const peerId = peerIdIn(conversation.id, user.id);
+        if (info.changes > 0 && convId) {
+          const event = { uuid, conversationId: convId, at };
+          const peerId = peerIdIn(convId, user.id);
           if (peerId) io.to(userRoom(peerId)).emit('message:deleted', event);
           socket.to(userRoom(user.id)).emit('message:deleted', event);
         }
@@ -292,7 +328,13 @@ export function attachRealtime(io, ctx) {
         connections.delete(user.id);
         const at = nowIso();
         q.setLastSeen.run(at, user.id);
-        if (peer) io.to(userRoom(peer.id)).emit('presence', { userId: user.id, online: false, at });
+        const peers = getPeerIdsForUser(user.id);
+        for (const pid of peers) {
+          io.to(userRoom(pid)).emit('presence', { userId: user.id, online: false, at });
+        }
+        if (peer && !peers.includes(peer.id)) {
+          io.to(userRoom(peer.id)).emit('presence', { userId: user.id, online: false, at });
+        }
       }
       log(config, `[socket] ${user.username} disconnected (${reason})`);
     });

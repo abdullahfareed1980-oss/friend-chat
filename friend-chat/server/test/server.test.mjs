@@ -17,6 +17,8 @@ const server = buildServer({
   isTest: true,
   logLevel: 'silent',
   skipDotEnv: true,
+  maxUsers: 2,
+  allowRegistration: false,
   otp: {
     ttlSeconds: 600,
     resendSeconds: 60,
@@ -467,5 +469,134 @@ test('Friend Chat Server', async (t) => {
     const row = server.db.prepare('SELECT * FROM messages WHERE uuid = ?').get(ack.message.uuid);
     assert.ok(row.deleted_at);
     assert.equal(row.envelope, '');
+  });
+
+  /* ---------------------------------------------------------------------- */
+  /* New WhatsApp-Alternative Flows: Auto-Registration, 2-Step & Discovery  */
+  /* ---------------------------------------------------------------------- */
+
+  await t.test('auto-registration: zero manual seeding, Gmail OTP, and 2-step password', async () => {
+    // Open registration for auto-registration test
+    server.config.allowRegistration = true;
+    server.config.maxUsers = 1_000_000;
+
+    // 1. Request OTP with new phone and Gmail
+    const reqRes = await api('/api/auth/request-otp', {
+      method: 'POST',
+      body: { countryCode: '+1', phone: '415 555 2671', email: 'alex@gmail.com' },
+    });
+    assert.equal(reqRes.status, 200);
+    const challenge = await reqRes.json();
+    assert.equal(challenge.phone, '14155552671');
+    assert.equal(challenge.email, 'alex@gmail.com');
+    assert.equal(challenge.known, false);
+    assert.match(challenge.devCode, /^\d{6}$/);
+
+    // 2. Verify OTP without password -> prompts for 2-step password setup
+    const verifyRes = await api('/api/auth/verify-otp', {
+      method: 'POST',
+      body: { challengeId: challenge.challengeId, code: challenge.devCode },
+    });
+    assert.equal(verifyRes.status, 200);
+    const verifyData = await verifyRes.json();
+    assert.equal(verifyData.verifiedOtp, true);
+    assert.equal(verifyData.needsPassword, true);
+
+    // 3. Complete Two-Step Verification by setting account password
+    const setPassRes = await api('/api/auth/set-password', {
+      method: 'POST',
+      body: {
+        challengeId: challenge.challengeId,
+        password: 'SuperSecretPassword123!',
+        displayName: 'Alex Morgan',
+      },
+    });
+    assert.equal(setPassRes.status, 200);
+    const session = await setPassRes.json();
+    assert.ok(session.token);
+    assert.equal(session.user.phone, '14155552671');
+    assert.equal(session.user.email, 'alex@gmail.com');
+    assert.equal(session.user.displayName, 'Alex Morgan');
+
+    // 4. Verify SQLite database permanently bound phone, email, and password_hash
+    const userRow = server.db.prepare('SELECT * FROM users WHERE phone = ?').get('14155552671');
+    assert.ok(userRow);
+    assert.equal(userRow.email, 'alex@gmail.com');
+    assert.ok(userRow.password_hash.startsWith('scrypt$'));
+  });
+
+  await t.test('strict account locking: rejects mismatched email with 403 Forbidden', async () => {
+    // Attempt OTP with Alex's phone but someone else's email
+    const lockedRes = await api('/api/auth/request-otp', {
+      method: 'POST',
+      body: { countryCode: '+1', phone: '415 555 2671', email: 'impostor@gmail.com' },
+    });
+    assert.equal(lockedRes.status, 403);
+    const body = await lockedRes.json();
+    assert.equal(body.error, 'account_locked');
+    assert.equal(body.message, 'Account locked to another email');
+
+    // Attempt direct password login with mismatched email
+    const loginLocked = await api('/api/auth/login', {
+      method: 'POST',
+      body: {
+        phone: '14155552671',
+        email: 'wrong@gmail.com',
+        password: 'SuperSecretPassword123!',
+      },
+    });
+    assert.equal(loginLocked.status, 403);
+    assert.equal((await loginLocked.json()).error, 'account_locked');
+
+    // Correct email and password succeeds
+    const loginOk = await api('/api/auth/login', {
+      method: 'POST',
+      body: {
+        phone: '14155552671',
+        email: 'alex@gmail.com',
+        password: 'SuperSecretPassword123!',
+      },
+    });
+    assert.equal(loginOk.status, 200);
+    assert.ok((await loginOk.json()).token);
+  });
+
+  await t.test('automated contacts and chat discovery', async () => {
+    // Login as Alex
+    const login = await api('/api/auth/login', {
+      method: 'POST',
+      body: {
+        phone: '14155552671',
+        email: 'alex@gmail.com',
+        password: 'SuperSecretPassword123!',
+      },
+    });
+    const { token: alexToken, user: alexUser } = await login.json();
+
+    // 1. Discover all registered contacts on the server
+    const contactsRes = await api('/api/contacts', { token: alexToken });
+    assert.equal(contactsRes.status, 200);
+    const { contacts } = await contactsRes.json();
+    assert.ok(Array.isArray(contacts));
+    assert.ok(contacts.length >= 2, 'discovers other users (Hana, Omar)');
+    assert.ok(contacts.some((c) => c.displayName === 'Hana'));
+
+    // 2. Start a direct chat with Hana
+    const hanaContact = contacts.find((c) => c.displayName === 'Hana');
+    const startChat = await api('/api/conversations', {
+      method: 'POST',
+      token: alexToken,
+      body: { peerId: hanaContact.id },
+    });
+    assert.equal(startChat.status, 200);
+    const { conversation: directConv, peer } = await startChat.json();
+    assert.ok(directConv.id);
+    assert.equal(peer.id, hanaContact.id);
+
+    // 3. List conversations
+    const convListRes = await api('/api/conversations', { token: alexToken });
+    assert.equal(convListRes.status, 200);
+    const { conversations } = await convListRes.json();
+    assert.ok(conversations.some((c) => c.conversation.id === directConv.id));
   });
 });

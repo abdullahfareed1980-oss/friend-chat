@@ -179,7 +179,8 @@ void main() {
     final challenge = await client.requestOtp(countryCode: '+62', phone: phone);
     expect(challenge.known, isTrue, reason: 'both numbers were just seeded');
     expect(challenge.devCode, isNotNull, reason: 'the server must run with OTP_DEBUG=true');
-    final session = await client.verifyOtp(challengeId: challenge.challengeId, code: challenge.devCode!);
+    final res = await client.verifyOtp(challengeId: challenge.challengeId, code: challenge.devCode!);
+    final session = res.session!;
     client.token = session.token;
     return session;
   }
@@ -207,11 +208,12 @@ void main() {
       expect(aliceChallenge.resendAfterSeconds, 60);
       expect(aliceChallenge.devCode, matches(RegExp(r'^\d{6}$')));
 
-      aliceSession = await alice.verifyOtp(
+      final res = await alice.verifyOtp(
         challengeId: aliceChallenge.challengeId,
         code: aliceChallenge.devCode!,
         device: {'name': 'e2e', 'platform': 'test'},
       );
+      aliceSession = res.session!;
 
       expect(aliceSession.token, isNotEmpty);
       expect(aliceSession.user.displayName, _humanA);

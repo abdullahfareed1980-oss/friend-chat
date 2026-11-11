@@ -74,12 +74,18 @@ class PhoneScreen extends StatefulWidget {
 class _PhoneScreenState extends State<PhoneScreen> {
   late Country _country = widget.initialCountry ?? kCountries.first;
   final TextEditingController _phone = TextEditingController();
+  final TextEditingController _email = TextEditingController();
+  final TextEditingController _password = TextEditingController();
+  bool _showPasswordLogin = false;
+  bool _obscurePassword = true;
   bool _busy = false;
   String? _error;
 
   @override
   void dispose() {
     _phone.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -103,6 +109,12 @@ class _PhoneScreenState extends State<PhoneScreen> {
       return;
     }
 
+    final email = _email.text.trim().toLowerCase();
+    if (!email.contains('@') || !email.contains('.')) {
+      setState(() => _error = 'Enter a valid Gmail or email address.');
+      return;
+    }
+
     setState(() {
       _busy = true;
       _error = null;
@@ -116,12 +128,21 @@ class _PhoneScreenState extends State<PhoneScreen> {
     }
 
     try {
-      final challenge = await client.requestOtp(countryCode: _country.dial, phone: digits);
+      final challenge = await client.requestOtp(
+        countryCode: _country.dial,
+        phone: digits,
+        email: email,
+      );
       if (!mounted) return;
       setState(() => _busy = false);
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => OtpScreen(client: client, challenge: challenge, phoneLabel: '${_country.dial} $digits'),
+          builder: (_) => OtpScreen(
+            client: client,
+            challenge: challenge,
+            phoneLabel: '${_country.dial} $digits',
+            email: email,
+          ),
         ),
       );
     } on ApiException catch (err) {
@@ -129,11 +150,75 @@ class _PhoneScreenState extends State<PhoneScreen> {
       setState(() {
         _busy = false;
         _error = switch (err.code) {
-          'phone_not_enrolled' => 'This number is not enrolled on your server. The owner adds numbers with `npm run seed -- --rotate`.',
+          'account_locked' => 'Account locked to another email. This phone number is permanently paired with a different email address.',
+          'email_already_bound' => 'This email is already linked to another phone number.',
+          'invalid_email' => 'Please enter a valid Gmail address.',
+          'phone_not_enrolled' => 'Registration is currently restricted on this server.',
           'resend_too_soon' => 'Wait a moment before requesting another code.',
           'invalid_country_code' || 'invalid_phone' => 'That phone number does not look right.',
           'too_many_requests' => 'Too many codes requested. Try again in an hour.',
-          _ => 'Could not request a code (${err.code}).',
+          _ => err.detail ?? 'Could not request a code (${err.code}).',
+        };
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Could not reach the server. Check your connection.';
+      });
+    }
+  }
+
+  Future<void> _loginWithPassword() async {
+    final digits = _phone.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 6) {
+      setState(() => _error = 'Enter your registered phone number.');
+      return;
+    }
+
+    final email = _email.text.trim().toLowerCase();
+    final password = _password.text;
+    if (password.isEmpty) {
+      setState(() => _error = 'Enter your Two-Step Verification password.');
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    final session = context.read<AppSession>();
+    final client = await requireOnboardingClient(context, session);
+    if (client == null) {
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
+
+    try {
+      final result = await client.loginWithPassword(
+        phone: digits,
+        countryCode: _country.dial,
+        email: email.isNotEmpty ? email : null,
+        password: password,
+        device: {
+          'id': session.deviceId,
+          'name': session.deviceName,
+          'platform': session.devicePlatform,
+        },
+      );
+      if (!mounted) return;
+      await session.signIn(result);
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } on ApiException catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = switch (err.code) {
+          'account_locked' => 'Account locked to another email. This phone number is permanently paired with a different email address.',
+          'invalid_credentials' => 'Incorrect password or phone number.',
+          _ => err.detail ?? 'Login failed (${err.code}).',
         };
       });
     } catch (_) {
@@ -166,21 +251,27 @@ class _PhoneScreenState extends State<PhoneScreen> {
         child: ListView(
           padding: const EdgeInsets.only(top: FcSpace.lg, bottom: FcSpace.xl),
           children: [
-            const Text('Your phone\nnumber', style: FcText.display),
+            Text(
+              _showPasswordLogin ? 'Sign in with\npassword' : 'Enter phone &\nGmail address',
+              style: FcText.display,
+            ),
             const SizedBox(height: FcSpace.sm),
             Text(
-              'Friend Chat verifies you with a code printed by your own server. '
-              'No SMS provider ever sees your number.',
+              _showPasswordLogin
+                  ? 'Enter your registered phone number, paired Gmail, and Two-Step Verification password.'
+                  : 'Zero manual seeding: register instantly or log in. A 6-digit OTP code will be sent directly to your Gmail via Nodemailer.',
               style: FcText.muted.copyWith(height: 1.5),
             ),
             const SizedBox(height: FcSpace.xl),
+
+            // Country Picker + Phone Input
             Row(
               children: [
                 InkWell(
                   onTap: _pickCountry,
                   borderRadius: BorderRadius.circular(FcRadius.md),
                   child: Container(
-                    height: 62,
+                    height: 58,
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
                       color: FcColors.surfaceHigh,
@@ -207,47 +298,117 @@ class _PhoneScreenState extends State<PhoneScreen> {
                     style: const TextStyle(fontSize: 18, letterSpacing: 0.6, fontWeight: FontWeight.w600),
                     decoration: const InputDecoration(
                       hintText: '812 3456 7890',
+                      labelText: 'Phone number',
                       counterText: '',
                     ),
-                    onSubmitted: (_) => _requestCode(),
+                    onSubmitted: (_) => _showPasswordLogin ? _loginWithPassword() : _requestCode(),
                   ),
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+
+            // Gmail Address Input
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              style: const TextStyle(fontSize: 16),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.email_outlined, size: 20, color: FcColors.textMuted),
+                hintText: 'yourname@gmail.com',
+                labelText: 'Gmail / Email address',
+                helperText: 'Your account is permanently locked to this email for security',
+                helperStyle: TextStyle(fontSize: 11.5, color: FcColors.textMuted.withOpacity(0.8)),
+              ),
+              onSubmitted: (_) => _showPasswordLogin ? _loginWithPassword() : _requestCode(),
+            ),
+
+            if (_showPasswordLogin) ...[
+              const SizedBox(height: 14),
+              TextField(
+                controller: _password,
+                obscureText: _obscurePassword,
+                style: const TextStyle(fontSize: 16),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20, color: FcColors.textMuted),
+                  labelText: 'Two-Step Verification Password',
+                  hintText: '••••••••',
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+                onSubmitted: (_) => _loginWithPassword(),
+              ),
+            ],
+
             if (_error != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: FcColors.danger.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(FcRadius.md),
+                  border: Border.all(color: FcColors.danger.withOpacity(0.4)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 18, color: FcColors.danger),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(color: FcColors.danger, fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: FcSpace.xl),
+            GradientButton(
+              label: _showPasswordLogin ? 'Log In' : 'Send Gmail OTP',
+              icon: _showPasswordLogin ? Icons.login_rounded : Icons.mark_email_read_rounded,
+              loading: _busy,
+              onPressed: _showPasswordLogin ? _loginWithPassword : _requestCode,
+            ),
+
+            const SizedBox(height: FcSpace.md),
+            Center(
+              child: TextButton(
+                onPressed: () => setState(() {
+                  _showPasswordLogin = !_showPasswordLogin;
+                  _error = null;
+                }),
+                child: Text(
+                  _showPasswordLogin ? 'Verify with Email OTP instead' : 'Log in with Two-Step Password instead',
+                  style: const TextStyle(color: FcColors.mint, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: FcSpace.lg),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: FcColors.surfaceHigh,
+                borderRadius: BorderRadius.circular(FcRadius.md),
+                border: Border.all(color: FcColors.divider),
+              ),
+              child: Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, size: 15, color: FcColors.danger),
-                  const SizedBox(width: 8),
+                  const Icon(Icons.verified_user_outlined, size: 18, color: FcColors.mint),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text(_error!, style: const TextStyle(color: FcColors.danger, fontSize: 12.5, height: 1.4)),
+                    child: Text(
+                      'Strict Account Locking: Each phone number is bound to its verified Gmail. Unauthorized attempts with mismatched emails are rejected.',
+                      style: FcText.caption.copyWith(height: 1.4),
+                    ),
                   ),
                 ],
               ),
-            ],
-            const SizedBox(height: FcSpace.lg),
-            GradientButton(label: 'Send code', icon: Icons.sms_rounded, loading: _busy, onPressed: _requestCode),
-            const SizedBox(height: FcSpace.md),
-            Center(
-              child: Text(
-                '${_country.name} · ${_country.dial}',
-                style: FcText.caption,
-              ),
-            ),
-            const SizedBox(height: FcSpace.xl),
-            Row(
-              children: [
-                const Icon(Icons.shield_rounded, size: 14, color: FcColors.mint),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Your number is stored only in your own database, as the key for this account.',
-                    style: FcText.caption.copyWith(height: 1.4),
-                  ),
-                ),
-              ],
             ),
           ],
         ),

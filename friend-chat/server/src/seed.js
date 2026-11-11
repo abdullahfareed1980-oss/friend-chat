@@ -53,11 +53,11 @@ export function seedUsers(db, people) {
   const created = [];
 
   const insertUser = db.prepare(
-    `INSERT INTO users (id, username, display_name, password_hash, phone, country_code, phone_verified_at, is_business, business_name, accent_color, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO users (id, username, display_name, password_hash, phone, country_code, phone_verified_at, email, email_verified_at, is_business, business_name, accent_color, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateExisting = db.prepare(
-    `UPDATE users SET password_hash = ?, display_name = ?, phone = ?, country_code = ?, business_name = ?
+    `UPDATE users SET password_hash = ?, display_name = ?, phone = ?, country_code = ?, email = COALESCE(?, email), email_verified_at = COALESCE(?, email_verified_at), business_name = ?
       WHERE id = ?`,
   );
   const findByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
@@ -75,12 +75,16 @@ export function seedUsers(db, people) {
       throw new Error(`phone ${normalized.phone} is already used by another account`);
     }
 
+    const userEmail = person.email ?? `${person.username}@friendchat.local`;
+
     if (existing) {
       updateExisting.run(
         hashPassword(person.password),
         person.displayName,
         normalized.phone,
         normalized.countryCode,
+        userEmail,
+        at,
         person.businessName,
         existing.id,
       );
@@ -94,6 +98,8 @@ export function seedUsers(db, people) {
         hashPassword(person.password),
         normalized.phone,
         normalized.countryCode,
+        at,
+        userEmail,
         at,
         person.businessName ? 1 : 0,
         person.businessName,

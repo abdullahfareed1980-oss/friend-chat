@@ -10,10 +10,11 @@ import '../widgets/common.dart';
 import '../widgets/friend_chat_logo.dart';
 import 'business_hub_screen.dart';
 import 'chat_screen.dart';
+import 'contacts_screen.dart';
 import 'settings_screen.dart';
 
 /// ---------------------------------------------------------------------------
-/// Home. One conversation, because Friend Chat is a two-person product.
+/// Home. Multi-conversation WhatsApp-style chats tab with contacts discovery.
 /// ---------------------------------------------------------------------------
 
 class ChatListScreen extends StatelessWidget {
@@ -26,8 +27,18 @@ class ChatListScreen extends StatelessWidget {
     final business = context.watch<BusinessController>();
     final peer = session.peer;
     final me = session.user;
+    final conversations = session.conversations;
 
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: FcColors.mint,
+        foregroundColor: const Color(0xFF04231A),
+        tooltip: 'New Chat / Discover Contacts',
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ContactsScreen()),
+        ),
+        child: const Icon(Icons.chat_rounded, size: 24),
+      ),
       body: FcScaffold(
         padded: false,
         child: Column(
@@ -49,6 +60,13 @@ class ChatListScreen extends StatelessWidget {
                   const Spacer(),
                   const FriendChatWordmark(markSize: 30, fontSize: 18),
                   const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.people_alt_outlined, size: 22),
+                    tooltip: 'Discover Contacts',
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                    ),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.settings_outlined, size: 21),
                     onPressed: () => Navigator.of(context).push(
@@ -88,34 +106,67 @@ class ChatListScreen extends StatelessWidget {
                 ),
               ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(FcSpace.md, 8, FcSpace.md, FcSpace.xl),
-                children: [
-                  if (peer != null) _ConversationTile(peer: peer),
-                  if (business.activeLabels.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final label in business.activeLabels)
-                            LabelChip(label: label),
-                        ],
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  await session.refreshConversations();
+                  await session.refreshContacts();
+                  await chat.syncNow();
+                },
+                color: FcColors.mint,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(FcSpace.md, 8, FcSpace.md, 90),
+                  children: [
+                    if (conversations.isNotEmpty)
+                      for (final conv in conversations)
+                        if (conv.peer != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _ConversationTile(
+                              peer: conv.peer!,
+                              lastWireMessage: conv.lastMessage,
+                              unreadBadge: conv.unreadCount,
+                              onTapOverride: () async {
+                                session.conversationId = conv.id;
+                                session.peer = conv.peer;
+                                await Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (_) => ChatScreen(peer: conv.peer!)),
+                                );
+                              },
+                            ),
+                          )
+                    else if (peer != null)
+                      _ConversationTile(peer: peer)
+                    else
+                      _NoChatsCard(
+                        onDiscoverContacts: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const ContactsScreen()),
+                        ),
                       ),
-                    ),
-                  if (session.user?.isBusiness == true) ...[
-                    const SectionHeader(title: 'Business tools'),
-                    _BusinessBanner(
-                      business: business,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const BusinessHubScreen()),
+                    if (business.activeLabels.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final label in business.activeLabels)
+                              LabelChip(label: label),
+                          ],
+                        ),
                       ),
-                    ),
+                    if (session.user?.isBusiness == true) ...[
+                      const SectionHeader(title: 'Business tools'),
+                      _BusinessBanner(
+                        business: business,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const BusinessHubScreen()),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: FcSpace.lg),
+                    _PrivacyFooter(peer: peer, ready: session.peerReadyToEncrypt),
                   ],
-                  const SizedBox(height: FcSpace.lg),
-                  _PrivacyFooter(peer: peer, ready: session.peerReadyToEncrypt),
-                ],
+                ),
               ),
             ),
           ],
@@ -125,15 +176,68 @@ class ChatListScreen extends StatelessWidget {
   }
 }
 
+class _NoChatsCard extends StatelessWidget {
+  const _NoChatsCard({required this.onDiscoverContacts});
+
+  final VoidCallback onDiscoverContacts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: FcColors.surfaceHigh,
+        borderRadius: BorderRadius.circular(FcRadius.lg),
+        border: Border.all(color: FcColors.divider),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.forum_outlined, size: 48, color: FcColors.mint),
+          const SizedBox(height: 12),
+          const Text(
+            'Zero Seeding & Instant Discovery',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'No manual seeding needed. Discovered contacts on your server appear automatically.',
+            textAlign: TextAlign.center,
+            style: FcText.muted.copyWith(fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FcColors.mint,
+              foregroundColor: const Color(0xFF04231A),
+            ),
+            icon: const Icon(Icons.person_search_rounded, size: 18),
+            label: const Text('Discover Contacts', style: TextStyle(fontWeight: FontWeight.w700)),
+            onPressed: onDiscoverContacts,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ConversationTile extends StatelessWidget {
-  const _ConversationTile({required this.peer});
+  const _ConversationTile({
+    required this.peer,
+    this.lastWireMessage,
+    this.unreadBadge,
+    this.onTapOverride,
+  });
 
   final ChatUser peer;
+  final ChatMessage? lastWireMessage;
+  final int? unreadBadge;
+  final VoidCallback? onTapOverride;
 
   @override
   Widget build(BuildContext context) {
     final chat = context.watch<ChatController>();
-    final last = chat.lastMessage;
+    final last = lastWireMessage ?? chat.lastMessage;
+    final unread = unreadBadge ?? chat.unreadCount;
 
     final preview = last == null
         ? 'Say hello — nothing leaves this server.'
@@ -148,9 +252,10 @@ class _ConversationTile extends StatelessWidget {
     return FcCard(
       padding: const EdgeInsets.all(14),
       glow: FcColors.indigo,
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => ChatScreen(peer: peer)),
-      ),
+      onTap: onTapOverride ??
+          () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => ChatScreen(peer: peer)),
+              ),
       child: Row(
         children: [
           FcAvatar(
@@ -222,7 +327,7 @@ class _ConversationTile extends StatelessWidget {
                 style: FcText.caption,
               ),
               const SizedBox(height: 6),
-              if (chat.unreadCount > 0)
+              if (unread > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
@@ -230,7 +335,7 @@ class _ConversationTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(FcRadius.pill),
                   ),
                   child: Text(
-                    '${chat.unreadCount}',
+                    '$unread',
                     style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF04231A)),
                   ),
                 )

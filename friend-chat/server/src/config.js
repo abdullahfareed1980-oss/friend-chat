@@ -85,8 +85,18 @@ export function loadConfig(overrides = {}) {
     // --- limits --------------------------------------------------------------
     maxMediaBytes: int(process.env.MAX_MEDIA_BYTES, 25 * 1024 * 1024),
     maxEnvelopeChars: int(process.env.MAX_ENVELOPE_CHARS, 96 * 1024),
-    maxUsers: int(process.env.MAX_USERS, 2),
-    allowRegistration: process.env.ALLOW_REGISTRATION === 'true',
+    maxUsers: process.env.MAX_USERS ? int(process.env.MAX_USERS, 1_000_000) : 1_000_000,
+    allowRegistration: process.env.ALLOW_REGISTRATION === 'false' ? false : true,
+
+    // --- email / SMTP delivery -----------------------------------------------
+    smtp: {
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: int(process.env.SMTP_PORT, 465),
+      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : true,
+      user: process.env.GMAIL_USER || process.env.SMTP_USER || '',
+      pass: process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || '',
+      from: process.env.SMTP_FROM || process.env.MAIL_FROM || '',
+    },
 
     // --- misc ----------------------------------------------------------------
     logLevel: process.env.LOG_LEVEL ?? 'info',

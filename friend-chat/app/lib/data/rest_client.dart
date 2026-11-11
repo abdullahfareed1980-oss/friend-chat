@@ -47,18 +47,22 @@ class OtpChallenge {
     required this.challengeId,
     required this.phone,
     required this.countryCode,
+    this.email,
     required this.expiresInSeconds,
     required this.resendAfterSeconds,
     required this.known,
+    this.hasPassword = false,
     this.devCode,
   });
 
   final String challengeId;
   final String phone;
   final String countryCode;
+  final String? email;
   final int expiresInSeconds;
   final int resendAfterSeconds;
   final bool known;
+  final bool hasPassword;
 
   /// Only present when the server runs with OTP_DEBUG=true.
   final String? devCode;
@@ -67,11 +71,33 @@ class OtpChallenge {
         challengeId: json['challengeId'] as String,
         phone: (json['phone'] ?? '') as String,
         countryCode: (json['countryCode'] ?? '') as String,
+        email: json['email'] as String?,
         expiresInSeconds: (json['expiresInSeconds'] ?? 600) as int,
         resendAfterSeconds: (json['resendAfterSeconds'] ?? 60) as int,
         known: json['known'] == true,
+        hasPassword: json['hasPassword'] == true,
         devCode: json['devCode'] as String?,
       );
+}
+
+class VerifyOtpResult {
+  const VerifyOtpResult({
+    this.session,
+    this.needsPassword = false,
+    this.requiresPassword = false,
+    this.challengeId,
+    this.phone,
+    this.email,
+  });
+
+  final LoginSession? session;
+  final bool needsPassword;
+  final bool requiresPassword;
+  final String? challengeId;
+  final String? phone;
+  final String? email;
+
+  bool get isSuccess => session != null;
 }
 
 class SyncPage {
@@ -150,35 +176,102 @@ class ApiClient {
     }
   }
 
-  Future<OtpChallenge> requestOtp({required String countryCode, required String phone}) async {
-    final json = await _post('/api/auth/request-otp', {'countryCode': countryCode, 'phone': phone});
+  Future<OtpChallenge> requestOtp({
+    required String countryCode,
+    required String phone,
+    String? email,
+  }) async {
+    final json = await _post('/api/auth/request-otp', {
+      'countryCode': countryCode,
+      'phone': phone,
+      if (email != null && email.isNotEmpty) 'email': email.trim().toLowerCase(),
+    });
     return OtpChallenge.fromJson(json);
   }
 
-  Future<LoginSession> verifyOtp({
+  Future<VerifyOtpResult> verifyOtp({
     required String challengeId,
     required String code,
+    String? password,
+    String? displayName,
     Map<String, dynamic>? device,
   }) async {
     final json = await _post('/api/auth/verify-otp', {
       'challengeId': challengeId,
       'code': code,
+      if (password != null) 'password': password,
+      if (displayName != null) 'displayName': displayName,
+      if (device != null) 'device': device,
+    });
+    if (json.containsKey('token')) {
+      return VerifyOtpResult(session: LoginSession.fromJson(json));
+    }
+    return VerifyOtpResult(
+      needsPassword: json['needsPassword'] == true,
+      requiresPassword: json['requiresPassword'] == true,
+      challengeId: (json['challengeId'] ?? challengeId) as String?,
+      phone: json['phone'] as String?,
+      email: json['email'] as String?,
+    );
+  }
+
+  Future<LoginSession> setPassword({
+    required String challengeId,
+    required String password,
+    String? displayName,
+    Map<String, dynamic>? device,
+  }) async {
+    final json = await _post('/api/auth/set-password', {
+      'challengeId': challengeId,
+      'password': password,
+      if (displayName != null) 'displayName': displayName,
       if (device != null) 'device': device,
     });
     return LoginSession.fromJson(json);
   }
 
   Future<LoginSession> loginWithPassword({
-    required String username,
+    String? phone,
+    String? countryCode,
+    String? email,
+    String? username,
     required String password,
     Map<String, dynamic>? device,
   }) async {
     final json = await _post('/api/auth/login', {
-      'username': username,
+      if (phone != null) 'phone': phone,
+      if (countryCode != null) 'countryCode': countryCode,
+      if (email != null) 'email': email,
+      if (username != null) 'username': username,
       'password': password,
       if (device != null) 'device': device,
     });
     return LoginSession.fromJson(json);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Contacts & Conversations Discovery                                 */
+  /* ------------------------------------------------------------------ */
+
+  Future<List<ChatUser>> getContacts() async {
+    final json = await _get('/api/contacts');
+    final list = json['contacts'] as List? ?? [];
+    return list.map((item) => ChatUser.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<ConversationSummary>> getConversations(String myUserId) async {
+    final json = await _get('/api/conversations');
+    final list = json['conversations'] as List? ?? [];
+    return list
+        .map((item) => ConversationSummary.fromJson(item as Map<String, dynamic>, myUserId: myUserId))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> startConversation({String? peerId, String? phone}) async {
+    return await _post('/api/conversations', {
+      if (peerId != null) 'peerId': peerId,
+      if (phone != null) 'phone': phone,
+    });
   }
 
   Future<LoginSession> me() async => LoginSession.fromJson({...await _get('/api/me'), 'token': token});

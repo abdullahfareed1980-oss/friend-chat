@@ -21,10 +21,12 @@ CREATE TABLE IF NOT EXISTS users (
   id                TEXT PRIMARY KEY,          -- uuid
   username          TEXT NOT NULL UNIQUE,      -- internal handle / fallback login
   display_name      TEXT NOT NULL,
-  password_hash     TEXT,                      -- scrypt$... (fallback login only)
+  password_hash     TEXT,                      -- scrypt$... (Two-Step Verification password)
   phone             TEXT UNIQUE,               -- E.164 digits, no '+'
   country_code      TEXT,                      -- '+62'
   phone_verified_at TEXT,
+  email             TEXT UNIQUE,               -- Gmail / primary email bound to phone
+  email_verified_at TEXT,
   is_business       INTEGER NOT NULL DEFAULT 0,
   business_name     TEXT,
   accent_color      TEXT NOT NULL DEFAULT '#4F46E5',
@@ -41,6 +43,7 @@ CREATE TABLE IF NOT EXISTS otp_challenges (
   id          TEXT PRIMARY KEY,
   phone       TEXT NOT NULL,
   country_code TEXT NOT NULL,
+  email       TEXT,
   code_hash   TEXT NOT NULL,
   attempts    INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,

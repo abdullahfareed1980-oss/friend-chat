@@ -29,7 +29,7 @@ export function verifyPassword(password, stored) {
 }
 
 export function passwordIsWeak(password) {
-  return typeof password !== 'string' || password.length < 12;
+  return typeof password !== 'string' || password.length < 6;
 }
 
 /* -------------------------------------------------------------------------- */

@@ -30,26 +30,33 @@ export function buildServer(overrides = {}) {
     next();
   });
 
-  if (config.corsOrigins.length > 0) {
-    app.use((req, res, next) => {
-      const origin = req.get('origin');
-      if (origin && config.corsOrigins.includes(origin)) {
-        res.set('Access-Control-Allow-Origin', origin);
-        res.set('Vary', 'Origin');
-        res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media');
-        res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        if (req.method === 'OPTIONS') return res.sendStatus(204);
-      }
-      next();
-    });
-  }
+  // Flexible CORS support for Cloud (Render / Railway) and Web / Mobile clients
+  app.use((req, res, next) => {
+    const origin = req.get('origin');
+    const allowAll = config.corsOrigins.length === 0 || config.corsOrigins.includes('*');
+    if (allowAll) {
+      res.set('Access-Control-Allow-Origin', origin || '*');
+      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media');
+      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    } else if (origin && config.corsOrigins.includes(origin)) {
+      res.set('Access-Control-Allow-Origin', origin);
+      res.set('Vary', 'Origin');
+      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media');
+      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+    next();
+  });
 
   const httpServer = createHttpServer(app);
   const io = new SocketServer(httpServer, {
-    cors: { origin: config.corsOrigins.length ? config.corsOrigins : false },
-    // WebSocket only: it survives Wi-Fi <-> cellular handoffs far better than
-    // HTTP long-polling, and it never leaks a token into a URL.
-    transports: ['websocket'],
+    cors: {
+      origin: config.corsOrigins.length === 0 || config.corsOrigins.includes('*') ? '*' : config.corsOrigins,
+      methods: ['GET', 'POST'],
+    },
+    // Supports WebSocket and polling for seamless connection across cloud proxies and mobile carriers
+    transports: ['websocket', 'polling'],
     pingInterval: 20_000,
     pingTimeout: 25_000,
     maxHttpBufferSize: config.maxEnvelopeChars + 8 * 1024,
@@ -62,9 +69,11 @@ export function buildServer(overrides = {}) {
   return {
     ...ctx,
     async listen() {
+      const port = Number.parseInt(process.env.PORT || '', 10) || config.port;
+      const host = process.env.HOST || config.host || '0.0.0.0';
       await new Promise((resolve, reject) => {
         httpServer.once('error', reject);
-        httpServer.listen(config.port, config.host, resolve);
+        httpServer.listen(port, host, resolve);
       });
       return httpServer.address();
     },

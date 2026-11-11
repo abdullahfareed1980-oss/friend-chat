@@ -35,11 +35,13 @@ class ChatUser {
     this.username = '',
     this.phone,
     this.countryCode,
+    this.email,
     this.isBusiness = false,
     this.businessName,
     this.accentColor = '#4F46E5',
     this.identityKey,
     this.lastSeenAt,
+    this.conversationId,
   });
 
   final String id;
@@ -47,11 +49,13 @@ class ChatUser {
   final String username;
   final String? phone;
   final String? countryCode;
+  final String? email;
   final bool isBusiness;
   final String? businessName;
   final String accentColor;
   final String? identityKey;
   final DateTime? lastSeenAt;
+  final String? conversationId;
 
   bool get hasKey => identityKey != null && identityKey!.isNotEmpty;
 
@@ -68,11 +72,13 @@ class ChatUser {
         username: (json['username'] ?? '') as String,
         phone: json['phone'] as String?,
         countryCode: json['countryCode'] as String?,
+        email: json['email'] as String?,
         isBusiness: json['isBusiness'] == true,
         businessName: json['businessName'] as String?,
         accentColor: (json['accentColor'] ?? '#4F46E5') as String,
         identityKey: json['identityKey'] as String?,
         lastSeenAt: json['lastSeenAt'] != null ? DateTime.tryParse(json['lastSeenAt'] as String) : null,
+        conversationId: json['conversationId'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -81,26 +87,71 @@ class ChatUser {
         'username': username,
         'phone': phone,
         'countryCode': countryCode,
+        'email': email,
         'isBusiness': isBusiness,
         'businessName': businessName,
         'accentColor': accentColor,
         'identityKey': identityKey,
         'lastSeenAt': lastSeenAt?.toIso8601String(),
+        'conversationId': conversationId,
       };
 
-  ChatUser copyWith({String? displayName, String? identityKey, bool? isBusiness, String? businessName}) =>
+  ChatUser copyWith({
+    String? displayName,
+    String? identityKey,
+    bool? isBusiness,
+    String? businessName,
+    String? email,
+    String? conversationId,
+  }) =>
       ChatUser(
         id: id,
         displayName: displayName ?? this.displayName,
         username: username,
         phone: phone,
         countryCode: countryCode,
+        email: email ?? this.email,
         isBusiness: isBusiness ?? this.isBusiness,
         businessName: businessName ?? this.businessName,
         accentColor: accentColor,
         identityKey: identityKey ?? this.identityKey,
         lastSeenAt: lastSeenAt,
+        conversationId: conversationId ?? this.conversationId,
       );
+}
+
+/// Summary of a conversation in the chats tab.
+class ConversationSummary {
+  const ConversationSummary({
+    required this.id,
+    required this.kind,
+    required this.createdAt,
+    this.peer,
+    this.lastMessage,
+    this.unreadCount = 0,
+  });
+
+  final String id;
+  final String kind;
+  final DateTime createdAt;
+  final ChatUser? peer;
+  final ChatMessage? lastMessage;
+  final int unreadCount;
+
+  factory ConversationSummary.fromJson(Map<String, dynamic> json, {required String myUserId}) {
+    final conv = (json['conversation'] as Map<String, dynamic>?) ?? json;
+    final peerJson = json['peer'] as Map<String, dynamic>?;
+    final lastMsgJson = json['lastMessage'] as Map<String, dynamic>?;
+
+    return ConversationSummary(
+      id: (conv['id'] ?? '') as String,
+      kind: (conv['kind'] ?? 'direct') as String,
+      createdAt: DateTime.tryParse((conv['createdAt'] ?? '') as String) ?? DateTime.now(),
+      peer: peerJson != null ? ChatUser.fromJson(peerJson) : null,
+      lastMessage: lastMsgJson != null ? ChatMessage.fromWire(lastMsgJson, myUserId: myUserId) : null,
+      unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 extension _Chars on String {

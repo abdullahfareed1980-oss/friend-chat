@@ -8,12 +8,12 @@ import '../data/rest_client.dart';
 import '../state/app_session.dart';
 import '../theme/friend_chat_theme.dart';
 import '../widgets/common.dart';
+import 'set_password_screen.dart';
 import 'welcome_screen.dart';
 
 /// ---------------------------------------------------------------------------
 /// OTP verification. Six boxes, one hidden field, auto-submit when full.
-/// The code is single use, expires in 10 minutes, and is verified by your own
-/// server - not by Twilio, Firebase or anyone else.
+/// The code is single use, expires in 10 minutes, delivered to Gmail via Nodemailer.
 /// ---------------------------------------------------------------------------
 
 class OtpScreen extends StatefulWidget {
@@ -22,11 +22,13 @@ class OtpScreen extends StatefulWidget {
     required this.client,
     required this.challenge,
     required this.phoneLabel,
+    this.email,
   });
 
   final ApiClient client;
   final OtpChallenge challenge;
   final String phoneLabel;
+  final String? email;
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -74,7 +76,7 @@ class _OtpScreenState extends State<OtpScreen> {
   Future<void> _verify() async {
     final code = _code.text.replaceAll(RegExp(r'\D'), '');
     if (code.length != 6) {
-      setState(() => _error = 'Enter the 6 digits from your server terminal.');
+      setState(() => _error = 'Enter the 6-digit verification code.');
       return;
     }
 
@@ -97,9 +99,34 @@ class _OtpScreenState extends State<OtpScreen> {
       );
 
       if (!mounted) return;
-      await session.signIn(result);
-      if (!mounted) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
+
+      if (result.isSuccess) {
+        await session.signIn(result.session!);
+        if (!mounted) return;
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        return;
+      }
+
+      if (result.needsPassword) {
+        // First-time registration: prompt to establish Two-Step Verification password
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => SetPasswordScreen(
+              client: widget.client,
+              challengeId: result.challengeId ?? _challenge.challengeId,
+              phoneLabel: widget.phoneLabel,
+              email: widget.email ?? _challenge.email,
+            ),
+          ),
+        );
+        return;
+      }
+
+      if (result.requiresPassword) {
+        setState(() => _busy = false);
+        _promptForPassword(context, session, result.challengeId ?? _challenge.challengeId);
+        return;
+      }
     } on ApiException catch (err) {
       if (!mounted) return;
       setState(() {
@@ -109,8 +136,8 @@ class _OtpScreenState extends State<OtpScreen> {
           'code_expired' => 'That code expired. Request a new one.',
           'challenge_used' => 'That code was already used. Request a new one.',
           'too_many_attempts' => 'Too many attempts. Request a new code.',
-          'phone_not_enrolled' => 'This number is no longer enrolled on the server.',
-          _ => 'Verification failed (${err.code}).',
+          'phone_not_enrolled' => 'Registration is restricted on this server.',
+          _ => err.detail ?? 'Verification failed (${err.code}).',
         };
       });
     } catch (_) {
@@ -122,6 +149,91 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
+  Future<void> _promptForPassword(BuildContext context, AppSession session, String challengeId) async {
+    final passwordCtrl = TextEditingController();
+    var obscure = true;
+    String? localError;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: FcColors.night,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(FcRadius.lg)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: FcSpace.lg,
+            right: FcSpace.lg,
+            top: FcSpace.lg,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + FcSpace.xl,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Enter 2-Step Password', style: FcText.title),
+              const SizedBox(height: 6),
+              Text(
+                'Enter the account password set for ${widget.phoneLabel}.',
+                style: FcText.muted.copyWith(fontSize: 13),
+              ),
+              const SizedBox(height: FcSpace.md),
+              TextField(
+                controller: passwordCtrl,
+                obscureText: obscure,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Account Password',
+                  hintText: '••••••••',
+                  suffixIcon: IconButton(
+                    icon: Icon(obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                    onPressed: () => setSheetState(() => obscure = !obscure),
+                  ),
+                ),
+              ),
+              if (localError != null) ...[
+                const SizedBox(height: 8),
+                Text(localError!, style: const TextStyle(color: FcColors.danger, fontSize: 12)),
+              ],
+              const SizedBox(height: FcSpace.lg),
+              GradientButton(
+                label: 'Confirm & Sign In',
+                icon: Icons.check_circle_rounded,
+                onPressed: () async {
+                  if (passwordCtrl.text.isEmpty) {
+                    setSheetState(() => localError = 'Please enter your password.');
+                    return;
+                  }
+                  try {
+                    final loginRes = await widget.client.loginWithPassword(
+                      phone: _challenge.phone,
+                      email: widget.email ?? _challenge.email,
+                      password: passwordCtrl.text,
+                      device: {
+                        'id': session.deviceId,
+                        'name': session.deviceName,
+                        'platform': session.devicePlatform,
+                      },
+                    );
+                    if (!mounted) return;
+                    Navigator.of(ctx).pop();
+                    await session.signIn(loginRes);
+                    if (!mounted) return;
+                    Navigator.of(context).popUntil((route) => route.isFirst);
+                  } on ApiException catch (e) {
+                    setSheetState(() => localError = e.detail ?? 'Incorrect password.');
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _resend() async {
     setState(() {
       _error = null;
@@ -131,6 +243,7 @@ class _OtpScreenState extends State<OtpScreen> {
       final next = await widget.client.requestOtp(
         countryCode: _challenge.countryCode,
         phone: _challenge.phone.substring(_challenge.countryCode.replaceAll('+', '').length),
+        email: widget.email ?? _challenge.email ?? '',
       );
       if (!mounted) return;
       setState(() {
@@ -173,10 +286,11 @@ class _OtpScreenState extends State<OtpScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: FcSpace.md),
-            const Text('Enter the\n6-digit code', style: FcText.display),
+            const Text('Enter 6-digit\nGmail code', style: FcText.display),
             const SizedBox(height: FcSpace.sm),
             Text(
-              'Sent to ${widget.phoneLabel} — printed in your server terminal, not by SMS.',
+              'A verification code was sent to ${widget.email ?? widget.phoneLabel}. '
+              'Enter it below to verify your identity.',
               style: FcText.muted.copyWith(height: 1.5),
             ),
             const SizedBox(height: FcSpace.xl),
