@@ -1,0 +1,11 @@
+{
+  "name": "friend-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Friend Chat - WhatsApp Alternative Messaging Application",
+  "scripts": {
+    "start": "cd friend-chat/server && node src/index.js",
+    "test": "cd friend-chat/server && npm test",
+    "postinstall": "cd friend-chat/server && npm install"
+  }
+}

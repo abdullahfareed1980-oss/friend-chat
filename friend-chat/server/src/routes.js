@@ -14,6 +14,7 @@ import {
   conversationIdsFor,
   directConversationBetween,
   getAllContacts,
+  getContactsByPhones,
   getOrCreateDirectConversation,
   isMember,
   listConversationsForUser,
@@ -27,6 +28,7 @@ import {
 import { hashPassword, loginThrottle, makeRequireAuth, passwordIsWeak, signToken, verifyPassword } from './auth.js';
 import { maskPhone, normalizePhone, PhoneError } from './phone.js';
 import { createMailer } from './mailer.js';
+import { log } from './config.js';
 
 const BUSINESS_SECTIONS = new Set(['quick_replies', 'auto_reply', 'catalog', 'labels']);
 const DEFAULT_BUSINESS = {
@@ -65,21 +67,6 @@ function safeEqualHex(a, b) {
   return left.length === right.length && left.length > 0 && timingSafeEqual(left, right);
 }
 
-function printOtpToServerConsole(config, { phone, countryCode, code, expiresInSeconds }) {
-  const display = `${countryCode} ${phone.slice(countryCode.replace(/\D/g, '').length)}`;
-  const line = '─'.repeat(46);
-  console.log('');
-  console.log(`  ┌${line}┐`);
-  console.log('  │  Friend Chat verification code             │');
-  console.log(`  │                                            │`);
-  console.log(`  │      ${code.split('').join(' ')}                           │`);
-  console.log(`  │                                            │`);
-  console.log(`  │  for ${display.padEnd(36)}│`);
-  console.log(`  │  valid for ${String(Math.round(expiresInSeconds / 60)).padEnd(2)} minutes, single use       │`);
-  console.log(`  └${line}┘`);
-  console.log('');
-  void config;
-}
 
 function noteDevice(db, userId, device, at) {
   if (!device?.id) return;
@@ -103,7 +90,7 @@ function issueSession({ db, config }, user, device) {
 }
 
 export function registerRoutes(app, ctx) {
-  const { db, config, io } = ctx;
+  const { db, config, io, log } = ctx;
   const requireAuth = makeRequireAuth(db, config);
   const mailer = createMailer(config);
 
@@ -241,7 +228,7 @@ export function registerRoutes(app, ctx) {
       req.ip ?? null,
     );
 
-    // Send code to user's Gmail via Nodemailer
+    // Send code to user's Gmail via Nodemailer (never logged to terminal console)
     await mailer.sendOtp({
       toEmail: email,
       code,
@@ -249,12 +236,7 @@ export function registerRoutes(app, ctx) {
       expiresInMinutes: Math.round(config.otp.ttlSeconds / 60),
     });
 
-    printOtpToServerConsole(config, {
-      phone: normalized.phone,
-      countryCode: normalized.countryCode,
-      code,
-      expiresInSeconds: config.otp.ttlSeconds,
-    });
+    log(config, `[friend-chat] OTP challenge generated for ${maskPhone(normalized.phone)}`);
     audit(db, 'otp_requested', existing?.id ?? null, {
       phone: maskPhone(normalized.phone),
       email,
@@ -426,6 +408,15 @@ export function registerRoutes(app, ctx) {
     const at = nowIso();
 
     if (!user) {
+      if (challenge.email) {
+        const emailConflict = db.prepare('SELECT * FROM users WHERE lower(email) = ?').get(challenge.email.toLowerCase());
+        if (emailConflict && emailConflict.phone !== challenge.phone) {
+          return res.status(403).json({
+            error: 'email_already_bound',
+            message: 'This email is already locked to another phone number.',
+          });
+        }
+      }
       const id = randomUUID();
       const name = displayName || `User ${challenge.phone.slice(-4)}`;
       db.prepare(
@@ -447,6 +438,13 @@ export function registerRoutes(app, ctx) {
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
       audit(db, 'account_enrolled', id, { phone: maskPhone(challenge.phone), email: challenge.email });
     } else {
+      if (user.email && challenge.email && user.email.toLowerCase() !== challenge.email.toLowerCase()) {
+        return res.status(403).json({
+          error: 'account_locked',
+          message: 'Account locked to another email',
+          hint: 'This phone number is permanently paired with a different email address.',
+        });
+      }
       db.prepare(
         `UPDATE users SET password_hash = ?, email = COALESCE(email, ?), email_verified_at = COALESCE(email_verified_at, ?)
          WHERE id = ?`,
@@ -553,6 +551,23 @@ export function registerRoutes(app, ctx) {
     res.set('Cache-Control', 'no-store');
     const contacts = getAllContacts(db, req.user.id);
     res.json({ contacts });
+  });
+
+  /**
+   * Automated contact sync and discovery from phone address book (WhatsApp style).
+   */
+  app.post('/api/contacts/sync', requireAuth, express.json({ limit: '64kb' }), (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const phones = Array.isArray(req.body?.phones) ? req.body.phones : [];
+    const contacts = getContactsByPhones(db, req.user.id, phones);
+    res.json({ contacts, totalFound: contacts.length });
+  });
+
+  app.post('/api/contacts', requireAuth, express.json({ limit: '64kb' }), (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const phones = Array.isArray(req.body?.phones) ? req.body.phones : [];
+    const contacts = getContactsByPhones(db, req.user.id, phones);
+    res.json({ contacts, totalFound: contacts.length });
   });
 
   /**

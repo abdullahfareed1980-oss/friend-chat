@@ -15,16 +15,22 @@ function lanAddresses() {
   return out;
 }
 
+const users = Number(server.db.prepare('SELECT COUNT(*) AS n FROM users').get().n);
+
 console.log('');
-console.log('  ┌──────────────────────────────────────────────┐');
-console.log('  │  Friend Chat Server                          │');
-console.log('  │  private • two-person • end-to-end           │');
-console.log('  └──────────────────────────────────────────────┘');
+console.log('  ┌────────────────────────────────────────────────────────────┐');
+console.log('  │  Friend Chat Server — WhatsApp Alternative Messaging       │');
+console.log('  │  Production & Cloud Ready • E2EE • Zero Terminal Seeding  │');
+console.log('  └────────────────────────────────────────────────────────────┘');
 console.log('');
 console.log(`  listening     http://${config.host}:${address.port}`);
 console.log(`  websocket     ws://${config.host}:${address.port}/socket.io/`);
-console.log(`  database      ${config.dbFile}`);
+console.log(`  database      ${config.dbFile} (SQLite WAL)`);
 console.log(`  media         ${config.mediaDir}`);
+console.log(`  onboarding    Automated Gmail OTP (Zero manual seeding required)`);
+console.log(`  security      Two-Step Verification & Permanent Account Locking`);
+console.log(`  mailer        Nodemailer (${config.smtp.host}:${config.smtp.port})`);
+console.log(`  users         ${users} registered account(s)`);
 console.log('');
 console.log('  Reachable on this machine / LAN:');
 console.log(`    http://127.0.0.1:${address.port}`);
@@ -32,12 +38,6 @@ for (const { name, address: ip } of lanAddresses()) {
   console.log(`    http://${ip}:${address.port}   (${name})`);
 }
 console.log('');
-
-const users = server.db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
-if (Number(users) === 0) {
-  console.log('  No accounts yet. Run:  npm run seed');
-  console.log('');
-}
 
 /* -------------------------------------------------------------------------- */
 /* Graceful shutdown so SQLite always closes cleanly                           */

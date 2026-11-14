@@ -36,14 +36,16 @@ export function buildServer(overrides = {}) {
     const allowAll = config.corsOrigins.length === 0 || config.corsOrigins.includes('*');
     if (allowAll) {
       res.set('Access-Control-Allow-Origin', origin || '*');
-      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media');
-      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media, accept, origin, x-requested-with');
+      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.set('Access-Control-Max-Age', '86400');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     } else if (origin && config.corsOrigins.includes(origin)) {
       res.set('Access-Control-Allow-Origin', origin);
       res.set('Vary', 'Origin');
-      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media');
-      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-fc-media, accept, origin, x-requested-with');
+      res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.set('Access-Control-Max-Age', '86400');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
     next();

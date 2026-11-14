@@ -5,28 +5,43 @@ import nodemailer from 'nodemailer';
  * Supports Gmail (via Google App Password) or custom SMTP server.
  */
 export function createMailer(config = {}) {
-  const host = process.env.SMTP_HOST || config.smtpHost || 'smtp.gmail.com';
-  const port = Number.parseInt(process.env.SMTP_PORT || config.smtpPort || '465', 10);
+  const host = process.env.SMTP_HOST || config.smtp?.host || config.smtpHost || 'smtp.gmail.com';
+  const port = Number.parseInt(process.env.SMTP_PORT || config.smtp?.port || config.smtpPort || '465', 10);
   const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465;
-  const user = process.env.GMAIL_USER || process.env.SMTP_USER || config.smtpUser;
-  const pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || config.smtpPass;
-  const from =
-    process.env.SMTP_FROM ||
-    process.env.MAIL_FROM ||
-    config.smtpFrom ||
-    (user ? `"Friend Chat" <${user}>` : '"Friend Chat" <noreply@friendchat.local>');
+  const user = process.env.GMAIL_USER || process.env.SMTP_USER || config.smtp?.user || config.smtpUser;
+  const pass = process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || config.smtp?.pass || config.smtpPass;
+  const fromEnv = process.env.SMTP_FROM || process.env.MAIL_FROM || config.smtp?.from || config.smtpFrom;
+
+  // Ensure the sender name is always "Friend Chat"
+  let from;
+  if (fromEnv) {
+    from = fromEnv.includes('<') && fromEnv.toLowerCase().includes('friend chat')
+      ? fromEnv
+      : `"Friend Chat" <${fromEnv.replace(/.*<([^>]+)>.*/, '$1')}>`;
+  } else if (user) {
+    from = `"Friend Chat" <${user}>`;
+  } else {
+    from = '"Friend Chat" <noreply@friendchat.local>';
+  }
 
   let transporter = null;
   if (user && pass) {
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: { user, pass },
-      tls: {
-        rejectUnauthorized: process.env.NODE_ENV === 'production',
-      },
-    });
+    if (host === 'smtp.gmail.com' || (user && user.endsWith('@gmail.com'))) {
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user, pass },
+      });
+    } else {
+      transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: { user, pass },
+        tls: {
+          rejectUnauthorized: process.env.NODE_ENV === 'production',
+        },
+      });
+    }
   }
 
   return {
@@ -56,7 +71,7 @@ export function createMailer(config = {}) {
                 💬
               </div>
               <h1 style="margin: 0; font-size: 22px; font-weight: 700; color: #e9edef; letter-spacing: -0.5px;">Friend Chat</h1>
-              <p style="margin: 6px 0 0 0; font-size: 13px; color: #8696a0;">Secure Self-Hosted Cloud Messaging</p>
+              <p style="margin: 6px 0 0 0; font-size: 13px; color: #8696a0;">Secure Self-Hosted Cloud Messaging &bull; WhatsApp Alternative</p>
             </td>
           </tr>
 
@@ -121,11 +136,11 @@ export function createMailer(config = {}) {
           return { ok: true, sent: true, messageId: info.messageId };
         } catch (err) {
           console.error(`[friend-chat mailer] Failed to send email to ${toEmail}: ${err.message}`);
-          // Don't crash server if SMTP fails; log clearly
           return { ok: false, sent: false, error: err.message };
         }
       } else {
-        console.log(`[friend-chat mailer] (Dev/No-SMTP mode) OTP code for ${toEmail} (${phone}): ${code}`);
+        // Exclusively sent to user email; NEVER print the OTP code to terminal console!
+        console.log(`[friend-chat mailer] OTP dispatched to ${toEmail} for phone ${phone}`);
         return { ok: true, sent: false, simulated: true };
       }
     },

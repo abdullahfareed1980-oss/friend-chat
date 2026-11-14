@@ -598,5 +598,59 @@ test('Friend Chat Server', async (t) => {
     assert.equal(convListRes.status, 200);
     const { conversations } = await convListRes.json();
     assert.ok(conversations.some((c) => c.conversation.id === directConv.id));
+
+    // 4. WhatsApp-style contact sync with phone numbers
+    const syncRes = await api('/api/contacts/sync', {
+      method: 'POST',
+      token: alexToken,
+      body: { phones: ['+62 812 3456 7890', '+62 811 9876 5432', '+1 999 888 7777'] },
+    });
+    assert.equal(syncRes.status, 200);
+    const syncData = await syncRes.json();
+    assert.ok(Array.isArray(syncData.contacts));
+    assert.equal(syncData.totalFound, 2, 'matched Hana and Omar from phone numbers');
+    assert.ok(syncData.contacts.some((c) => c.displayName === 'Hana'));
+    assert.ok(syncData.contacts.some((c) => c.displayName === 'Omar'));
+
+    // 5. Contact sync with empty phones returns all registered contacts
+    const syncAllRes = await api('/api/contacts/sync', {
+      method: 'POST',
+      token: alexToken,
+      body: { phones: [] },
+    });
+    assert.equal(syncAllRes.status, 200);
+    const syncAllData = await syncAllRes.json();
+    assert.ok(syncAllData.contacts.length >= 2);
+  });
+
+  await t.test('email uniqueness locking: cannot bind same email to different phone', async () => {
+    // Alex's email is alex@gmail.com bound to 14155552671
+    // Try to register new phone with Alex's email
+    const duplicateEmail = await api('/api/auth/request-otp', {
+      method: 'POST',
+      body: {
+        countryCode: '+1',
+        phone: '415 999 8888',
+        email: 'alex@gmail.com',
+      },
+    });
+    assert.equal(duplicateEmail.status, 403);
+    const body = await duplicateEmail.json();
+    assert.equal(body.error, 'email_already_bound');
+  });
+
+  await t.test('cloud ready & 24/7 deployment: CORS preflight and headers', async () => {
+    const corsRes = await fetch(`${base}/api/health`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://friendchat.app',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type',
+      },
+    });
+    assert.equal(corsRes.status, 204);
+    assert.ok(corsRes.headers.get('access-control-allow-origin'));
+    assert.ok(corsRes.headers.get('access-control-allow-methods'));
+    assert.ok(corsRes.headers.get('access-control-allow-headers'));
   });
 });

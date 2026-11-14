@@ -157,6 +157,34 @@ export function getAllContacts(db, currentUserId) {
   });
 }
 
+/** Sync and discover contacts matching phone numbers from user's address book. */
+export function getContactsByPhones(db, currentUserId, phoneNumbers = []) {
+  if (!phoneNumbers || !Array.isArray(phoneNumbers) || phoneNumbers.length === 0) {
+    return getAllContacts(db, currentUserId);
+  }
+  const cleanNumbers = [
+    ...new Set(
+      phoneNumbers
+        .map((p) => String(p).replace(/\D/g, ''))
+        .filter((p) => p.length >= 6),
+    ),
+  ];
+  if (cleanNumbers.length === 0) {
+    return [];
+  }
+  const placeholders = cleanNumbers.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT * FROM users WHERE id <> ? AND phone IN (${placeholders}) ORDER BY display_name ASC`)
+    .all(currentUserId, ...cleanNumbers);
+  return rows.map((u) => {
+    const directConv = directConversationBetween(db, currentUserId, u.id);
+    return {
+      ...serializeUser(u),
+      conversationId: directConv?.id ?? null,
+    };
+  });
+}
+
 export function isMember(db, conversationId, userId) {
   return Boolean(
     db
